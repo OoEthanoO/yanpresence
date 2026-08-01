@@ -1,0 +1,135 @@
+import log from './log.js';
+
+const ACTIVITY_LISTENING = 2;
+
+// Discord's Status Display Type enum: which field is rendered on the one-line
+// status under your name / in the member list.
+const STATUS_DISPLAY = { name: 0, state: 1, details: 2 };
+
+const LIMITS = {
+  details: 128,
+  state: 128,
+  largeText: 128,
+  smallText: 128,
+  url: 256,
+  asset: 313,
+};
+
+/**
+ * Builds the SET_ACTIVITY payload.
+ *
+ * Layout mirrors Discord's first-party Spotify integration, with one
+ * deliberate difference: Spotify puts the *artist* on the one-line status
+ * (status_display_type = STATE) and we put the *song* there
+ * (status_display_type = DETAILS).
+ *
+ *   Listening to Apple Music        <- header, from the application's name
+ *   Bohemian Rhapsody               <- details, links to the song
+ *   Queen                           <- state, links to the artist
+ *   [album art]                     <- hover shows the album, links to it
+ */
+export function buildActivity({ track, state, catalog, artworkUrl, config, startedAt }) {
+  const playing = state === 'playing';
+
+  const songName = clamp(track.name, LIMITS.details);
+  const artistName = clamp(track.artist || track.albumArtist || 'Unknown Artist', LIMITS.state);
+  const albumName = track.album || catalog?.albumName || '';
+
+  const activity = {
+    type: ACTIVITY_LISTENING,
+    // Discord renders the header from the application's name, so this exists
+    // mainly for clients that echo the field back.
+    name: config.activityName,
+    status_display_type: STATUS_DISPLAY[config.statusDisplay] ?? STATUS_DISPLAY.details,
+    details: songName,
+    state: artistName,
+    assets: {},
+    instance: false,
+  };
+
+  // Discord rejects one-character details/state.
+  if (activity.details.length < 2) activity.details = `${activity.details} `;
+  if (activity.state.length < 2) activity.state = `${activity.state} `;
+
+  // --- clickable text ---------------------------------------------------
+  const songUrl = clampUrl(catalog?.songUrl);
+  const artistUrl = clampUrl(catalog?.artistUrl);
+  const albumUrl = clampUrl(catalog?.albumUrl);
+
+  if (songUrl) activity.details_url = songUrl;
+  if (artistUrl) activity.state_url = artistUrl;
+
+  // --- artwork ----------------------------------------------------------
+  // Something must always occupy the large image slot. Leaving it empty, or
+  // pointing it at a URL Discord cannot resolve, renders as Discord's "?"
+  // placeholder — so fall back to a transparent asset uploaded to the
+  // Developer Portal. Portal assets are referenced by name and always
+  // resolve, which an external URL is not guaranteed to do.
+  if (artworkUrl && artworkUrl.length <= LIMITS.asset) {
+    activity.assets.large_image = artworkUrl;
+  } else if (config.placeholderImageKey) {
+    activity.assets.large_image = config.placeholderImageKey;
+    if (artworkUrl) {
+      log.debug(`Artwork URL too long (${artworkUrl.length} chars); using the placeholder`);
+    }
+  }
+  if (albumName) {
+    activity.assets.large_text = clamp(albumName, LIMITS.largeText);
+  }
+  if (albumUrl) activity.assets.large_url = albumUrl;
+
+  if (config.showSmallImage && config.smallImageKey) {
+    activity.assets.small_image = config.smallImageKey;
+    activity.assets.small_text = playing ? 'Apple Music' : 'Paused';
+  }
+
+  // --- progress ---------------------------------------------------------
+  // Only while playing: a frozen bar reads as a stalled stream, and Discord
+  // has no "paused" affordance of its own.
+  if (playing && track.duration > 0 && startedAt) {
+    const start = Math.round(startedAt);
+    const end = start + Math.round(track.duration * 1000);
+    activity.timestamps = { start, end };
+  }
+
+  // --- optional buttons -------------------------------------------------
+  // details_url / state_url / large_url are comparatively new. Buttons are the
+  // long-standing way to attach links, kept here as an opt-in fallback.
+  if (config.linkButtons) {
+    const buttons = [];
+    if (songUrl) buttons.push({ label: 'Play on Apple Music', url: songUrl });
+    if (albumUrl && buttons.length < 2) buttons.push({ label: 'View Album', url: albumUrl });
+    else if (artistUrl && buttons.length < 2) buttons.push({ label: 'View Artist', url: artistUrl });
+    if (buttons.length) activity.buttons = buttons;
+  }
+
+  if (!Object.keys(activity.assets).length) delete activity.assets;
+
+  return activity;
+}
+
+function clamp(value, max) {
+  const s = String(value ?? '').trim();
+  if (s.length <= max) return s;
+  return `${s.slice(0, max - 1)}…`;
+}
+
+function clampUrl(url) {
+  if (!url) return null;
+  const s = String(url);
+  if (!/^https?:\/\//i.test(s)) return null;
+  if (s.length > LIMITS.url) {
+    log.debug(`Dropping over-long URL (${s.length} chars): ${s.slice(0, 60)}…`);
+    return null;
+  }
+  return s;
+}
+
+/** Compact single-line description used for logging. */
+export function describe(activity) {
+  const bits = [activity.details, activity.state].filter(Boolean);
+  const art = activity.assets?.large_image;
+  const animated = art && /\.(gif|webp|avif)(\?|$)/i.test(art);
+  const kind = !art ? 'no art' : animated ? 'animated art' : 'static art';
+  return `${bits.join(' — ')} [${kind}]`;
+}

@@ -1,0 +1,81 @@
+{
+  // Required. Discord Developer Portal -> your application -> Application ID.
+  // Name that application "Apple Music": Discord builds the "Listening to ..."
+  // header from the application name, not from anything we send.
+  "clientId": "",
+
+  // Apple Music storefront for catalog lookups and the links we attach.
+  "storefront": "us",
+
+  // Which field Discord shows on the one-line status under your name.
+  //   "details" -> the song  (this is the default, and what you probably want)
+  //   "state"   -> the artist (what Spotify's own integration does)
+  //   "name"    -> "Apple Music"
+  "statusDisplay": "details",
+
+  // Where encoded artwork is hosted so Discord has a URL to fetch.
+  //
+  // "webhook": post to a Discord webhook you own (Channel -> Edit Channel ->
+  //   Integrations -> Webhooks -> New Webhook). Easiest. Subject to Discord's
+  //   per-file cap: 10MB unboosted, 50MB at Boost Level 2.
+  //
+  // "command": hand the file to your own uploader and read the URL it prints.
+  //   No Discord involvement and no cap. {file} and {name} are substituted:
+  //     "rclone copyto {file} r2:art/{name} >&2 && echo https://cdn.you.com/{name}"
+  //     "aws s3 cp {file} s3://bucket/{name} >&2 && echo https://cdn.you.com/{name}"
+  // "s3" is the recommended mode. NOTE: "webhook" uploads fine but Discord
+  // will NOT render cdn.discordapp.com URLs as presence assets — they carry a
+  // signed query string and come out as the grey "?" placeholder.
+  //
+  // For Cloudflare R2, fill in all five s3 fields. See the README.
+  "hosting": {
+    "mode": "s3",
+    "s3": {
+      "endpoint": "https://<accountId>.r2.cloudflarestorage.com",
+      "bucket": "yanpresence",
+      "accessKeyId": "",
+      "secretAccessKey": "",
+      "region": "auto",
+      "publicBaseUrl": "https://pub-<hash>.r2.dev"
+    },
+    "command": "",
+    "webhookUrl": ""
+  },
+
+  // Animated album art. These defaults sacrifice nothing: the FULL loop, at
+  // source framerate, at high quality — ~3.7MB, which fits a free webhook.
+  //
+  // Measured on a real Apple motion master (full 20.6s loop, 30fps):
+  //   1024px AVIF crf20 ->  3.7MB      2160px AVIF crf26 ->  8.4MB
+  //   2160px AVIF crf20 -> 12.2MB      2160px AVIF crf14 -> 18.8MB
+  //   2160px WebP q92   -> 88.3MB      1000px GIF        -> ~128MB
+  //
+  // format: "avif" (default) | "webp" (needs `brew install webp`) | "gif"
+  // maxDurationSec: null plays the whole loop. Set a number only to truncate.
+  // onOversize: "degrade" refits over-budget encodes; "skip" refuses to
+  //   compromise and falls back to static art instead.
+  //
+  // For absolute maximum — Apple's full 2160x2160 at near-source quality —
+  // use size 2160 + crf 14 with "command" hosting and "maxBytes": null.
+  "animatedArtwork": {
+    "enabled": true,
+    "format": "avif",
+    "size": 1024,
+    "fps": 30,
+    "maxDurationSec": null,
+    "crf": 20,
+    "quality": 75,
+    "onOversize": "degrade",
+    "ffmpegPath": "ffmpeg",
+    "img2webpPath": "img2webp"
+  },
+
+  "showWhenPaused": false,
+  "showSmallImage": true,
+  "smallImageKey": "applemusic",
+  "placeholderImageKey": "blank",
+  "linkButtons": false,
+  "artworkSize": 1000,
+  "pollIntervalMs": 1000,
+  "logLevel": "info"
+}
