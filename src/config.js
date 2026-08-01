@@ -60,8 +60,10 @@ export const DEFAULTS = {
   // the artist.
   statusDisplay: 'details',
 
-  // Square pixel size requested from Apple's artwork CDN.
-  artworkSize: 1000,
+  // Square pixel size requested from Apple's artwork CDN. 1024 matches the
+  // asset size Discord's docs recommend, and the size animated artwork is
+  // encoded at, so both paths deliver the same dimensions.
+  artworkSize: 1024,
 
   // Small badge in the corner of the album art. This one is a Rich Presence
   // art asset uploaded in the Developer Portal, referenced by its name.

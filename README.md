@@ -22,7 +22,7 @@ And expanded, when someone clicks into your profile:
   ┌────────────┐
   │            │   Be Her            ← clickable → the song on Apple Music
   │ album art  │   Ella Langley      ← clickable → the artist
-  │  1000×1000 │   ▓▓▓▓▓░░░░░ 1:04   ← live progress
+  │  1024×1024 │   ▓▓▓▓▓░░░░░ 1:04   ← live progress
   └────────────┘
      ↑ hover shows the album, click opens it
 ```
@@ -41,7 +41,8 @@ And expanded, when someone clicks into your profile:
   when setting presence"*. That's why step 1 of setup is naming the application
   `Apple Music`: the header reads "Listening to Apple Music" while the status
   line reads the song.
-- **1000×1000 album art**, pulled from Apple's artwork CDN at full square size.
+- **1024×1024 album art**, pulled from Apple's artwork CDN at full square size —
+  the asset size Discord's own docs recommend.
 - **Animated album art** where Apple has published motion artwork — the *full*
   loop at source framerate, transcoded from Apple's HLS master to animated AVIF
   (see [Animated artwork](#animated-artwork)).
@@ -213,7 +214,7 @@ Posts to a Discord webhook you own. Fine if you just want the files kept
 somewhere visible, but see the warning above — Discord will not render those
 URLs as presence assets. Capped at 10 MB unboosted, 50 MB at Boost Level 2.
 
-With neither configured, everything still works — you just get static 1000×1000
+With neither configured, everything still works — you just get static 1024×1024
 art. Animation is opt-in, not required.
 
 ### Nothing is truncated, shrunk, or degraded
@@ -264,7 +265,7 @@ looking better. It's available because you asked for max, not because it helps.
 
 If you would rather have *no* animation than a compromised one, set
 `"onOversize": "skip"` — an over-budget encode is abandoned and the static
-1000×1000 cover is used instead of being re-encoded smaller.
+1024×1024 cover is used instead of being re-encoded smaller.
 
 ### If it does go over budget
 
@@ -275,7 +276,7 @@ the settings up on webhook hosting, `onOversize` decides what happens:
   resolution, and the retry targets the budget by area rather than stepping down
   blindly, so it converges in one extra pass. Duration is never truncated.
 - `"skip"` — refuse to compromise. The animation is abandoned and the static
-  1000×1000 cover is used instead.
+  1024×1024 cover is used instead.
 
 Setting `"maxBytes": null` disables the check entirely, which is the right thing
 with `command` hosting.
@@ -302,7 +303,7 @@ single-frame still cover, stream 1 is the animation. Probing `v:0` reports
 
 ### Other notes
 
-- Static artwork is always requested at 1000×1000 (`artworkSize`), independent
+- Static artwork is always requested at 1024×1024 (`artworkSize`), independent
   of any of this.
 - Discord attachment URLs are signed and expire after roughly 24 hours. The
   cache tracks each URL's expiry and re-uploads before it lapses. Command-hosted
@@ -333,7 +334,7 @@ Config is read from the first of these that exists:
 | `activityName` | `"Apple Music"` | Keep in sync with the app's name in the portal. |
 | `storefront` | `"us"` | Apple Music storefront for lookups and links. |
 | `statusDisplay` | `"details"` | Which field lands on your status line: `details` (song), `state` (artist, Spotify's choice), `name`. |
-| `artworkSize` | `1000` | Square px requested from Apple's CDN. |
+| `artworkSize` | `1024` | Square px requested from Apple's CDN. |
 | `showSmallImage` | `true` | Small corner badge. |
 | `smallImageKey` | `"applemusic"` | Name of the Art Asset uploaded in the portal. |
 | `placeholderImageKey` | `"blank"` | Portal asset shown when there's no album art, so the slot never renders as Discord's "?". Upload `assets/blank.png`. `null` leaves the slot empty. |
@@ -401,7 +402,7 @@ A few decisions worth calling out:
   That's the only route to `editorialVideo` (motion artwork) — the public
   MusicKit API doesn't expose it. If that path fails for any reason, it falls
   back to the unauthenticated iTunes Search API, which still yields links and
-  1000×1000 art, just no animation.
+  1024×1024 art, just no animation.
 - **Matching is fuzzy and scored.** Local titles and catalog titles rarely agree
   character-for-character (`Song (feat. X) - Remastered 2011` vs `Song`), so
   editorial decoration is stripped before comparing, and title/artist/album/

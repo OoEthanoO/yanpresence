@@ -75,7 +75,7 @@
   "smallImageKey": "applemusic",
   "placeholderImageKey": "blank",
   "linkButtons": false,
-  "artworkSize": 1000,
+  "artworkSize": 1024,
   "pollIntervalMs": 1000,
   "logLevel": "info"
 }

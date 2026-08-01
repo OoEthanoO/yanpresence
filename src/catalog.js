@@ -272,8 +272,9 @@ export class AppleCatalog {
     if (cached) {
       const ttl = cached.result ? POSITIVE_TTL_MS : NEGATIVE_TTL_MS;
       if (Date.now() - cached.ts < ttl) {
-        this.memo.set(key, cached.result);
-        return cached.result;
+        const result = this.withCurrentArtworkSize(cached.result);
+        if (result) this.memo.set(key, result);
+        return result;
       }
     }
 
@@ -296,6 +297,17 @@ export class AppleCatalog {
 
     this.inflight.set(key, promise);
     return promise;
+  }
+
+  /**
+   * Re-derives the artwork URL from the stored template at the size currently
+   * configured. Entries live for 30 days, so without this a change to
+   * `artworkSize` would keep serving the old dimensions until they aged out.
+   */
+  withCurrentArtworkSize(result) {
+    if (!result?.artworkTemplate) return result;
+    const url = artworkAt(result.artworkTemplate, this.artworkSize);
+    return url && url !== result.artworkUrl ? { ...result, artworkUrl: url } : result;
   }
 
   async resolve(track) {
