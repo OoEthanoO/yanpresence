@@ -73,7 +73,7 @@ function similarity(a, b) {
 /**
  * Apple artwork URLs are templates: `.../{w}x{h}bb.jpg`. iTunes Search returns
  * a concrete small size instead, which we rewrite. Either way we can ask for
- * any square size we want -- 1000x1000 here.
+ * any square size we want -- whatever `artworkSize` is set to.
  */
 export function artworkAt(template, size) {
   if (!template) return null;

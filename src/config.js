@@ -181,7 +181,7 @@ export const DEFAULTS = {
 
     // What to do when an encode exceeds maxBytes:
     //   "degrade" — re-encode at lower quality, then smaller, to fit.
-    //   "skip"    — refuse to compromise; fall back to static 1000x1000 art.
+    //   "skip"    — refuse to compromise; fall back to the static cover.
     // Irrelevant when maxBytes is null, since nothing is ever over budget.
     onOversize: 'degrade',
 
@@ -282,7 +282,7 @@ export function validateConfig(config) {
     );
   }
 
-  // Unconfigured hosting is deliberately not a problem: we fall back to static
-  // 1000x1000 artwork. `--doctor` surfaces it as a hint.
+  // Unconfigured hosting is deliberately not a problem: we fall back to the
+  // static cover at `artworkSize`. `--doctor` surfaces it as a hint.
   return problems;
 }

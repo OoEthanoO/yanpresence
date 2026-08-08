@@ -59,8 +59,8 @@ export class YanPresence {
     log.info('Watching Music.app');
     if (!this.artwork.canHost) {
       log.info(
-        'No artwork hosting configured — album art will be static 1000x1000. ' +
-          'Set hosting.webhookUrl (or hosting.command) to enable animated artwork.'
+        `No artwork hosting configured — album art will be static ${this.config.artworkSize}x${this.config.artworkSize}. ` +
+          'Set hosting.s3 (or hosting.command) to enable animated artwork.'
       );
     }
   }

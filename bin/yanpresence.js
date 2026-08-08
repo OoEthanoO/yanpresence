@@ -335,7 +335,7 @@ async function cmdDoctor(config) {
           '      accessKeyId, secretAccessKey, publicBaseUrl) — album art will be static.'
         : config.hosting.mode === 'command'
           ? 'hosting.mode is "command" but hosting.command is empty — album art will be static.'
-          : 'no hosting.webhookUrl — album art will be static 1000x1000.'
+          : 'no hosting.webhookUrl — album art will be static.'
     );
   } else if (!tools.ffmpeg) {
     bad('animated artwork', `ffmpeg not found at "${config.animatedArtwork.ffmpegPath}" (brew install ffmpeg)`);

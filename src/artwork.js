@@ -105,6 +105,14 @@ export class ArtworkHost {
     }
     // Re-encoding after a settings change would otherwise need a manual purge.
     if (entry.recipe && entry.recipe !== this.recipe()) return null;
+    // The same applies to *where* it was hosted. Point `publicBaseUrl` at a new
+    // bucket -- moving machines, or fixing a wrong one -- and every cached URL
+    // still refers to the old place. Nothing expires on the s3 path, so without
+    // this the dead URLs would be served indefinitely.
+    if (this.hosting.mode === 's3' && entry.url) {
+      const base = (this.hosting.s3?.publicBaseUrl ?? '').replace(/\/+$/, '');
+      if (base && !entry.url.startsWith(`${base}/`)) return null;
+    }
     // Refresh an hour early rather than serving a URL that expires mid-song.
     if (entry.expiresAt && entry.expiresAt - 60 * 60 * 1000 < Date.now()) return null;
     return entry;
@@ -192,7 +200,7 @@ export class ArtworkHost {
 
         // "skip" means the artwork is worth having only at full fidelity:
         // rather than quietly shipping a degraded encode, give up and let the
-        // caller fall back to the static 1000x1000 cover.
+        // caller fall back to the static cover.
         if (this.opts.onOversize === 'skip') {
           throw new Error(
             `${format} is ${(bytes / 1048576).toFixed(1)}MB, over the ${(budget / 1048576).toFixed(0)}MB ` +
