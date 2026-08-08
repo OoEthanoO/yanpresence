@@ -381,6 +381,18 @@ node bin/yanpresence.js --verbose    # debug logging
 `--dry-run` needs no `clientId` and is the fastest way to see exactly what
 Discord would be told.
 
+## Tests
+
+```bash
+npm test
+```
+
+Node's built-in runner, no dependencies. Covers the activity payload's
+constraints (the `status_display_type` mapping, length caps, the never-empty
+image slot), artwork cache invalidation, and the watcher's watchdog. Nothing
+touches Music.app, Discord or the network, so it runs anywhere — though the
+watchdog cases wait on a real 5s interval, which puts the suite at ~20s.
+
 ## How it works
 
 ```

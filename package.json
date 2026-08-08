@@ -9,6 +9,7 @@
   "main": "./src/index.js",
   "scripts": {
     "start": "node bin/yanpresence.js",
+    "test": "node --test test/*.test.js",
     "doctor": "node bin/yanpresence.js --doctor",
     "install-agent": "bash launchd/install.sh",
     "uninstall-agent": "bash launchd/uninstall.sh"
