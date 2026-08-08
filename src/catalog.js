@@ -36,13 +36,24 @@ export function normalizeTitle(input) {
 export function normalizeLoose(input) {
   return String(input || '')
     .normalize('NFKD')
-    // Drop combining marks so "Beyoncé" and "Beyonce" compare equal.
+    // Drop *Latin* combining marks so "Beyoncé" and "Beyonce" compare equal.
+    // Deliberately not all of \p{M}: NFKD splits Japanese ダ into タ + U+3099,
+    // and dropping that mark would turn "dansu" into "tansu" -- a different
+    // word. Those survive to the NFC recomposition below instead.
     .replace(/[̀-ͯ]/g, '')
     .replace(/[‘’ʼ]/g, "'")
     .replace(/[“”]/g, '"')
     .toLowerCase()
     .replace(/&/g, ' and ')
-    .replace(/[^a-z0-9']+/g, ' ')
+    // Letters, digits and combining marks in any script, not just ASCII.
+    // Restricting this to [a-z0-9] erased non-Latin titles entirely -- a wholly
+    // Hangul, Cyrillic or CJK track normalized to the empty string, which
+    // `lookup()` reads as "nothing to search for" and skips, so it got no links
+    // and no artwork. Marks are kept so a decomposed character is not split by
+    // a space before it can be put back together.
+    .replace(/[^\p{L}\p{N}\p{M}']+/gu, ' ')
+    // Reassemble what NFKD took apart, so ダ is ダ again rather than タ+mark.
+    .normalize('NFC')
     .trim();
 }
 
