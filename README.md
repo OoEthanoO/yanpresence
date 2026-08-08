@@ -258,6 +258,13 @@ lift the cap by hosting it yourself:
 refit. On a free webhook, `2160 / crf 26` (8.4 MB) gets you Apple's full
 resolution and framerate within the 10 MB cap.
 
+Uncapping is not a gamble on the `s3` path: **Discord's media proxy has been
+verified to fetch and animate a 54.59 MB AVIF** (1024×1024, 16.7s @ 30fps,
+57,241,567 bytes) served from a `pub-*.r2.dev` URL — it renders in the status
+card like any other. The 10/50 MB numbers are Discord's *webhook upload* limits
+and do not apply to an external URL, which is why `maxBytes` defaults to
+unlimited under `s3` and `command`.
+
 Worth knowing before you do: **Discord renders the presence asset far smaller
 than 1024** — its own docs recommend 1024×1024 assets, and the media proxy
 downscales whatever you give it. 2160 costs bytes and encode time without
