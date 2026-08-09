@@ -435,13 +435,23 @@ app gets its own art. It needs a `utsk` session key, obtained the same way
 of it. `src/tvcatalog.js` caches the key for a week and refetches once on a
 rejection.
 
-Apple's TV art is 16:9 and Discord's slot is square, so requests use the `sr`
-crop code — a plain `1024x1024` request returns a letterboxed `1024x576`, while
-`1024x1024sr` returns a real square. `posterArt` is preferred over `coverArt`
-because it carries the title treatment; `coverArt` is an untitled still.
+**Every season of every Apple Original has a dedicated square cover** — the
+titled 3000×3000 key art the iTunes Store used to show — and that is what gets
+displayed, per season, with no cropping and no matting. It comes from the
+per-season metadata route, where the naming is a trap: the season's own square
+sits under `previewFrame`, while the key literally called `coverArt` belongs to
+the *show* (`showImages`). Grepping for "coverArt" finds the same image for
+every season and makes per-season art look nonexistent.
 
-Lookups are keyed on the **show**, not the episode, so a whole binge costs one
-request, and results are cached for 30 days.
+A season the metadata route has nothing for falls back to the show's own
+square cover. The remaining non-square case (a film's shelf image) is fitted
+with the `bf` crop code, which mattes the full frame instead of cropping it —
+every other crop code either eats the title treatment (`sr`, `cc`, `ve`) or
+ignores the square entirely and returns 16:9 (`bb`, plain).
+
+Lookups are keyed on the **show** plus the season being watched: a binge costs
+one search, one season-list call, and one metadata call per season you reach,
+each cached for 30 days.
 
 **What does not resolve:** that search covers the Apple TV+ catalogue, not the
 iTunes Store. A purchased or rented film returns no match and keeps the

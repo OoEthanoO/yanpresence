@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { episodeCode, isEpisode } from '../src/tv.js';
-import { tvArtworkAt } from '../src/tvcatalog.js';
+import os from 'node:os';
+
+import { tvArtworkAt, TvCatalog } from '../src/tvcatalog.js';
 import { buildWatchActivity } from '../src/presence.js';
 import { DEFAULTS } from '../src/config.js';
 import { YanPresence } from '../src/index.js';
@@ -107,28 +109,44 @@ test('progress is withheld while paused', () => {
   assert.equal(a.timestamps, undefined);
 });
 
-test('TV artwork is requested as a real square', () => {
-  // Apple's TV art is 16:9. A plain 1024x1024 request returns a letterboxed
-  // 1024x576; the `sr` crop code is what actually yields a square, which is
-  // what Discord's asset slot wants.
+test('TV artwork is squared without cropping the frame', () => {
+  // Apple's TV art is 16:9. A plain 1024x1024 request returns 1024x576, and
+  // the crop codes that do fill a square (sr/cc/ve) eat the title treatment.
+  // `bf` fits the whole frame onto a matte instead, losing nothing.
   assert.equal(
     tvArtworkAt('https://is1-ssl.mzstatic.com/image/thumb/abc/{w}x{h}.{f}', 1024),
-    'https://is1-ssl.mzstatic.com/image/thumb/abc/1024x1024sr.jpg'
+    'https://is1-ssl.mzstatic.com/image/thumb/abc/1024x1024bf.jpg'
   );
   // Some templates already carry a crop code; it must be replaced, not appended.
   assert.equal(
     tvArtworkAt('https://is1-ssl.mzstatic.com/image/thumb/abc/{w}x{h}sr.{f}', 512),
-    'https://is1-ssl.mzstatic.com/image/thumb/abc/512x512sr.jpg'
+    'https://is1-ssl.mzstatic.com/image/thumb/abc/512x512bf.jpg'
   );
   assert.equal(
     tvArtworkAt('https://is1-ssl.mzstatic.com/image/thumb/abc/{w}x{h}bb.{f}', 512),
-    'https://is1-ssl.mzstatic.com/image/thumb/abc/512x512sr.jpg'
+    'https://is1-ssl.mzstatic.com/image/thumb/abc/512x512bf.jpg'
   );
   assert.equal(tvArtworkAt(null, 1024), null);
 });
 
+test('the season being watched gets its own artwork, with a show-level fallback', () => {
+  const cat = new TvCatalog({ storefront: 'ca', cacheDir: os.tmpdir(), artworkSize: 1024 });
+  const entry = {
+    title: 'Ted Lasso',
+    artworkTemplate: 'https://x/thumb/SHOW/{w}x{h}.{f}',
+    seasons: { 1: 'https://x/thumb/S1/{w}x{h}CA.TVA23C01.{f}', 2: 'https://x/thumb/S2/{w}x{h}{c}.{f}' },
+  };
+  assert.match(cat.withCurrentSize(entry, 2).artworkUrl, /thumb\/S2\/1024x1024bf\.jpg$/);
+  assert.equal(cat.withCurrentSize(entry, 2).artworkScope, 'season 2');
+  // A season Apple has no separate art for falls back rather than showing none.
+  assert.match(cat.withCurrentSize(entry, 9).artworkUrl, /thumb\/SHOW\//);
+  assert.equal(cat.withCurrentSize(entry, 9).artworkScope, 'show');
+  // Films have no season at all.
+  assert.match(cat.withCurrentSize(entry, 0).artworkUrl, /thumb\/SHOW\//);
+});
+
 test('resolved artwork replaces the placeholder', () => {
-  const url = 'https://is1-ssl.mzstatic.com/image/thumb/abc/1024x1024sr.jpg';
+  const url = 'https://is1-ssl.mzstatic.com/image/thumb/abc/1024x1024bf.jpg';
   const a = buildWatchActivity({
     item: EPISODE,
     state: 'playing',

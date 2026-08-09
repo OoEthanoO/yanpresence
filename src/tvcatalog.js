@@ -143,14 +143,20 @@ export class TvCatalog {
     const term = item.isEpisode && item.show ? item.show : item.name;
     if (!term) return null;
 
+    const season = item.isEpisode ? item.season : 0;
     const key = `${this.storefront}|${term.toLowerCase()}`;
-    if (this.memo.has(key)) return this.withCurrentSize(this.memo.get(key));
+    if (this.memo.has(key)) {
+      const entry = this.memo.get(key);
+      await this.ensureSeasonCover(entry, season, key);
+      return this.withCurrentSize(entry, season);
+    }
 
     const cached = this.disk[key];
     // 30 days, matching the music catalog cache.
     if (cached && Date.now() - cached.ts < 30 * 24 * 60 * 60 * 1000) {
       this.memo.set(key, cached);
-      return this.withCurrentSize(cached);
+      await this.ensureSeasonCover(cached, season, key);
+      return this.withCurrentSize(cached, season);
     }
 
     if (this.inflight.has(key)) return this.inflight.get(key);
@@ -163,7 +169,7 @@ export class TvCatalog {
         this.memo.set(key, entry);
         this.disk[key] = entry;
         this.saveDisk();
-        return this.withCurrentSize(entry);
+        return this.withCurrentSize(entry, season);
       })
       .catch((err) => {
         log.debug(`Apple TV lookup failed for "${term}": ${err.message}`);
@@ -175,10 +181,19 @@ export class TvCatalog {
     return promise;
   }
 
-  /** Re-derives the URL at the configured size, as the music catalog does. */
-  withCurrentSize(entry) {
+  /**
+   * Re-derives the URL at the configured size, as the music catalog does, and
+   * prefers the artwork for the season being watched. A season Apple has no
+   * separate art for -- and every film -- falls back to the show's own.
+   */
+  withCurrentSize(entry, season = 0) {
     if (!entry || entry.miss) return null;
-    return { ...entry, artworkUrl: tvArtworkAt(entry.artworkTemplate, this.artworkSize) };
+    const template = (season && entry.seasons?.[season]) || entry.artworkTemplate;
+    return {
+      ...entry,
+      artworkUrl: tvArtworkAt(template, this.artworkSize),
+      artworkScope: season && entry.seasons?.[season] ? `season ${season}` : 'show',
+    };
   }
 
   async resolve(term, item) {
@@ -228,13 +243,117 @@ export class TvCatalog {
       pickUrl(images.contentImage);
     if (!template) return null;
 
-    return {
+    const entry = {
       title: best.c.title,
       id: best.c.id ?? '',
       type: best.c.type ?? '',
       artworkTemplate: template,
       url: best.c.id ? `${TV_WEB}/${this.storefront}/show/${encodeURIComponent(best.c.id)}` : '',
     };
+
+    if (!wantMovie && entry.id) {
+      entry.seasonIds = await this.seasonIds(entry.id, token).catch((err) => {
+        log.debug(`Season list lookup failed: ${err.message}`);
+        return null;
+      });
+      // Seed the covers for the season being watched; lookup() fills in any
+      // other season on demand later.
+      await this.ensureSeasonCover(entry, item.isEpisode ? item.season : 0);
+    }
+    return entry;
+  }
+
+  /**
+   * The season list, `{ seasonNumber: seasonId }`, from the show endpoint's
+   * `data.seasons` map. The map only appears when `utscf` is present --
+   * without the flag the response has no seasons at all, which is why season
+   * support looked unavailable at first.
+   */
+  async seasonIds(showId, token) {
+    const body = await this.getJson(
+      `${UTS_BASE}/shows/${encodeURIComponent(showId)}?utsk=${encodeURIComponent(token)}` +
+        `&caller=web&sf=${this.sf}&v=80&pfm=web&locale=en-US&utscf=OjAAAAAAAAA~`
+    );
+    const seasons = body?.data?.seasons;
+    if (!seasons || typeof seasons !== 'object') return null;
+
+    const ids = {};
+    for (const season of Object.values(seasons)) {
+      if (Number.isInteger(season?.seasonNumber) && season?.id) ids[season.seasonNumber] = season.id;
+    }
+    return Object.keys(ids).length ? ids : null;
+  }
+
+  /**
+   * Square covers from the per-season metadata route -- the assets the iTunes
+   * Store showed per season, which Apple still publishes for every season of
+   * every Original.
+   *
+   * The naming is a trap: the season's own 3000x3000 square sits under
+   * `data.images.previewFrame`, while the key literally called `coverArt`
+   * lives under `data.showImages` and belongs to the *show*. Grepping for
+   * "coverArt" therefore finds the same image for every season and makes
+   * per-season art look nonexistent -- which is exactly the mistake this
+   * comment is here to prevent repeating.
+   */
+  async seasonCover(seasonId, token) {
+    const body = await this.getJson(
+      `${UTS_BASE}/seasons/${encodeURIComponent(seasonId)}/metadata?utsk=${encodeURIComponent(token)}` +
+        `&caller=web&sf=${this.sf}&v=80&pfm=web&locale=en-US&utscf=OjAAAAAAAAA~`
+    );
+    if (!body) return null;
+
+    const images = body?.data?.images ?? {};
+    const showImages = body?.data?.showImages ?? {};
+    return {
+      season: squareUrl(images.coverArt) ?? squareUrl(images.previewFrame),
+      show: squareUrl(showImages.coverArt) ?? squareUrl(showImages.previewFrame),
+    };
+  }
+
+  /**
+   * Fetches and memoises the covers for one season, on demand. Only the
+   * season actually being watched costs a request, once, per thirty days; the
+   * same response upgrades the show-level fallback from the 16:9 poster to
+   * the show's own square.
+   */
+  async ensureSeasonCover(entry, season, cacheKey = null) {
+    const ids = entry?.seasonIds;
+    if (!ids || entry.miss) return;
+    entry.seasons ??= {};
+
+    const wantSeason = Boolean(season && ids[season]) && entry.seasons[season] === undefined;
+    if (!wantSeason && entry.coverChecked) return;
+
+    const token = await this.tokens.get();
+    if (!token) return;
+
+    const sid = (season && ids[season]) || Object.values(ids)[0];
+    const covers = await this.seasonCover(sid, token).catch((err) => {
+      log.debug(`Season cover lookup failed: ${err.message}`);
+      return null;
+    });
+    if (!covers) return;
+
+    // null is stored deliberately: it remembers that this season has no square
+    // of its own, so it is not re-requested on every episode.
+    if (season && ids[season]) entry.seasons[season] = covers.season ?? null;
+    if (covers.show) entry.artworkTemplate = covers.show;
+    entry.coverChecked = true;
+
+    if (cacheKey) {
+      this.disk[cacheKey] = entry;
+      this.saveDisk();
+    }
+  }
+
+
+  async getJson(url) {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': BROWSER_UA, Origin: TV_WEB, Referer: `${TV_WEB}/` },
+      signal: AbortSignal.timeout(12000),
+    });
+    return res.ok ? res.json() : null;
   }
 
   async search(term, token) {
@@ -252,6 +371,12 @@ export class TvCatalog {
   }
 }
 
+/** The template URL, but only when the asset is genuinely square. */
+function squareUrl(image) {
+  const url = pickUrl(image);
+  return url && image.width === image.height ? url : null;
+}
+
 function pickUrl(image) {
   const url = image?.url;
   return typeof url === 'string' && url.includes('{w}') ? url : null;
@@ -265,13 +390,24 @@ function norm(s) {
 }
 
 /**
- * Apple's TV art is 16:9, and Discord's asset slot is square. `sr` is the crop
- * code that returns a real square rather than the letterboxed 16:9 that a
- * plain `{w}x{h}` request yields even when both are equal.
+ * Apple's TV art is 16:9 and Discord's asset slot is square, so the crop code
+ * decides what happens to the other 43% of the frame.
+ *
+ *   (none) / bb   ignore the square entirely and return 1024x576
+ *   sr / cc / ve  fill the square by cropping — which eats the title treatment
+ *   bf            fit the whole frame into the square on a matte
+ *
+ * `bf` is the one that loses nothing: the full 16:9 image, letterboxed, with
+ * the show's wordmark intact. Cropping is the wrong trade here because the
+ * wordmark is the only part still legible at the size Discord renders.
  */
 export function tvArtworkAt(template, size) {
   if (!template) return null;
   return template
-    .replace(/\{w\}x\{h\}([a-z]{0,4})/i, `${size}x${size}sr`)
+    // The crop slot is sometimes a literal code (`sr`, `CA.TVA23C01`) and
+    // sometimes a `{c}` placeholder. Both are replaced outright. The lookahead
+    // matters: a code like `CA.TVA23C01` contains dots, so the match has to
+    // stop at the extension rather than at the first dot it meets.
+    .replace(/\{w\}x\{h\}(?:\{c\}|[A-Za-z0-9.\-]*?)(?=\.\{f\})/, `${size}x${size}bf`)
     .replace('{f}', 'jpg');
 }
