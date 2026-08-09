@@ -381,6 +381,73 @@ node bin/yanpresence.js --verbose    # debug logging
 `--dry-run` needs no `clientId` and is the fastest way to see exactly what
 Discord would be told.
 
+## Apple TV
+
+TV.app descends from the same iTunes scripting dictionary as Music.app — it
+answers `player state`, `player position` and `current track` the same way — so
+watching it costs one more resident `osascript` and nothing else. Turn it on:
+
+```json
+"tv": { "enabled": true }
+```
+
+What lands on Discord, for an episode:
+
+```
+  Watching Apple TV
+  ┌────────────┐
+  │            │   Ted Lasso           ← details: the show
+  │ show art   │   S2E8 · Man City     ← state, hover shows the episode
+  │  1024²     │   ▓▓▓▓▓░░░░░ 12:04    ← live progress
+  └────────────┘
+```
+
+The **show** goes on the one-line status rather than the episode — the opposite
+of the music layout, and deliberate: "Watching Ted Lasso" means something to a
+reader, "Watching Man City" does not. Films use their own title, with the year
+and director beneath. Only one source holds the presence at a time; whatever is
+actually playing wins, and video beats audio when both are.
+
+### You need a second Discord application
+
+Discord builds the card header from the **application's** name, and one
+connection speaks for one application — the same constraint that makes step 1
+of setup "name it `Apple Music`". Announce a TV show through the music
+application and the header reads *"Watching Apple Music"*.
+
+So create a second application named **`Apple TV`**, upload the same
+[`assets/blank.png`](assets/blank.png) as `blank`, and put its Application ID in
+`tv.clientId`. yanpresence reconnects under the right application as you switch
+between watching and listening. Leave it empty and everything still works —
+only the header is wrong.
+
+### Artwork
+
+Two of the obvious routes are dead ends. The **iTunes Search API** has retired
+TV content — `media=tvShow` and `media=movie` both return zero results for
+everything, including titles plainly in the Store — and **Apple TV+ streams
+carry no embedded artwork** (`artworks.length` is 0), unlike a downloaded
+purchase.
+
+What works is the backend behind tv.apple.com, which is where the Apple TV web
+app gets its own art. It needs a `utsk` session key, obtained the same way
+`catalog.js` obtains the music token: load the public page and read the key out
+of it. `src/tvcatalog.js` caches the key for a week and refetches once on a
+rejection.
+
+Apple's TV art is 16:9 and Discord's slot is square, so requests use the `sr`
+crop code — a plain `1024x1024` request returns a letterboxed `1024x576`, while
+`1024x1024sr` returns a real square. `posterArt` is preferred over `coverArt`
+because it carries the title treatment; `coverArt` is an untitled still.
+
+Lookups are keyed on the **show**, not the episode, so a whole binge costs one
+request, and results are cached for 30 days.
+
+**What does not resolve:** that search covers the Apple TV+ catalogue, not the
+iTunes Store. A purchased or rented film returns no match and keeps the
+`placeholderImageKey` fallback. Matching requires a title hit, so a near-miss
+yields no artwork rather than the wrong artwork.
+
 ## Tests
 
 ```bash

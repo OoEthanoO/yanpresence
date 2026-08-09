@@ -13,6 +13,30 @@
   //   "name"    -> "Apple Music"
   "statusDisplay": "details",
 
+  // Apple TV. TV.app is scripted through the same iTunes-descended dictionary
+  // as Music.app, so this costs one more resident osascript and nothing else.
+  // Only one source holds the presence at a time: whatever is actually
+  // playing wins, and video beats audio when both are.
+  //
+  // clientId: Discord builds the card header from the *application* name, and
+  //   one connection speaks for one application. Left empty, TV is announced
+  //   through the Apple Music application and the header reads "Watching
+  //   Apple Music". Create a SECOND Discord application named "Apple TV" and
+  //   paste its Application ID here for the correct header — yanpresence
+  //   reconnects automatically as it switches between the two.
+  //
+  // Artwork comes from the backend behind tv.apple.com (the iTunes Search API
+  // no longer carries TV content, and TV+ streams have no embedded cover).
+  // That covers the Apple TV+ catalogue; a purchased Store film finds no match
+  // and falls back to placeholderImageKey.
+  "tv": {
+    "enabled": false,
+    "clientId": "",
+    "activityName": "Apple TV",
+    "showSmallImage": false,
+    "smallImageKey": "appletv"
+  },
+
   // Where encoded artwork is hosted so Discord has a URL to fetch.
   //
   // "webhook": post to a Discord webhook you own (Channel -> Edit Channel ->

@@ -60,6 +60,33 @@ export const DEFAULTS = {
   // the artist.
   statusDisplay: 'details',
 
+  // Apple TV. TV.app is scripted through the same iTunes-descended dictionary
+  // as Music.app, so watching it costs one more resident osascript and
+  // nothing else. Only one source holds the presence at a time; whatever is
+  // actually playing wins, and video beats audio when both are.
+  tv: {
+    enabled: false,
+
+    // Discord builds the card header from the *application* name, and the
+    // handshake binds one application per connection. Leave this empty and
+    // TV shows are announced through the Apple Music application, so the
+    // header reads "Watching Apple Music". Create a second Discord
+    // application named "Apple TV" and paste its Application ID here to get
+    // the right header; yanpresence reconnects as it switches between them.
+    clientId: '',
+
+    // Cosmetic: echoed back to clients that display it. The header itself
+    // always comes from the application's name in the portal.
+    activityName: 'Apple TV',
+
+    // Apple publishes no artwork we can reach for TV: the iTunes Search API
+    // returns nothing for TV media, Apple TV+ streams carry no embedded
+    // cover, and the Apple TV backend needs a session token. The large image
+    // slot therefore gets `placeholderImageKey`.
+    showSmallImage: false,
+    smallImageKey: 'appletv',
+  },
+
   // Square pixel size requested from Apple's artwork CDN. 1024 matches the
   // asset size Discord's docs recommend, and the size animated artwork is
   // encoded at, so both paths deliver the same dimensions.
@@ -279,6 +306,14 @@ export function validateConfig(config) {
   if (!['webp', 'avif', 'gif'].includes(config.animatedArtwork.format)) {
     problems.push(
       `animatedArtwork.format must be "webp", "avif" or "gif" (got ${config.animatedArtwork.format})`
+    );
+  }
+
+  if (config.tv?.enabled && config.tv.clientId && !/^\d{17,20}$/.test(String(config.tv.clientId))) {
+    problems.push(
+      `tv.clientId is malformed (got ${config.tv.clientId}). It is the Application ID of a ` +
+        'second Discord application named "Apple TV". Leave it empty to announce TV through ' +
+        'the Apple Music application instead.'
     );
   }
 

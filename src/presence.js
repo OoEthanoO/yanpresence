@@ -1,6 +1,8 @@
 import log from './log.js';
+import { episodeCode } from './tv.js';
 
 const ACTIVITY_LISTENING = 2;
+const ACTIVITY_WATCHING = 3;
 
 // Discord's Status Display Type enum: which field is rendered on the one-line
 // status under your name / in the member list.
@@ -101,6 +103,71 @@ export function buildActivity({ track, state, catalog, artworkUrl, config, start
     if (albumUrl && buttons.length < 2) buttons.push({ label: 'View Album', url: albumUrl });
     else if (artistUrl && buttons.length < 2) buttons.push({ label: 'View Artist', url: artistUrl });
     if (buttons.length) activity.buttons = buttons;
+  }
+
+  if (!Object.keys(activity.assets).length) delete activity.assets;
+
+  return activity;
+}
+
+/**
+ * Builds the SET_ACTIVITY payload for TV.app.
+ *
+ *   Watching Apple TV              <- header, from the application's name
+ *   Ted Lasso                      <- details: the show, not the episode
+ *   S2E8 · Man City                <- state
+ *   [artwork]                      <- placeholder; see below
+ *
+ * The show goes on the one-line status rather than the episode, which is the
+ * opposite of the music layout and deliberate: "Watching Ted Lasso" means
+ * something to a reader, "Watching Man City" does not.
+ *
+ * There is no album art equivalent. Apple retired TV content from the iTunes
+ * Search API (every `media=tvShow` query returns zero), Apple TV+ streams
+ * carry no embedded artwork, and the Apple TV backend refuses requests without
+ * a session token. So the image slot gets the transparent portal placeholder,
+ * the same fallback used when a track has no cover.
+ */
+export function buildWatchActivity({ item, state, artworkUrl, config, startedAt }) {
+  const playing = state === 'playing';
+  const code = episodeCode(item);
+
+  // A film has no show to promote, so its own title takes the status line.
+  const heading = item.isEpisode && item.show ? item.show : item.name;
+  const subtitle = item.isEpisode
+    ? [code, item.name].filter(Boolean).join(' · ')
+    : [item.year || null, item.director || null].filter(Boolean).join(' · ');
+
+  const activity = {
+    type: ACTIVITY_WATCHING,
+    name: config.tv?.activityName ?? 'Apple TV',
+    status_display_type: STATUS_DISPLAY[config.statusDisplay] ?? STATUS_DISPLAY.details,
+    details: clamp(heading, LIMITS.details),
+    state: clamp(subtitle || (item.isEpisode ? 'Episode' : 'Film'), LIMITS.state),
+    assets: {},
+    instance: false,
+  };
+
+  if (activity.details.length < 2) activity.details = `${activity.details} `;
+  if (activity.state.length < 2) activity.state = `${activity.state} `;
+
+  if (artworkUrl && artworkUrl.length <= LIMITS.asset) {
+    activity.assets.large_image = artworkUrl;
+  } else if (config.placeholderImageKey) {
+    activity.assets.large_image = config.placeholderImageKey;
+  }
+  // Hovering the art shows the episode title when the status line is the show.
+  const hover = item.isEpisode && item.show ? [item.name, code].filter(Boolean).join(' · ') : '';
+  if (hover) activity.assets.large_text = clamp(hover, LIMITS.largeText);
+
+  if (config.tv?.showSmallImage && config.tv?.smallImageKey) {
+    activity.assets.small_image = config.tv.smallImageKey;
+    activity.assets.small_text = playing ? 'Apple TV' : 'Paused';
+  }
+
+  if (playing && item.duration > 0 && startedAt) {
+    const start = Math.round(startedAt);
+    activity.timestamps = { start, end: start + Math.round(item.duration * 1000) };
   }
 
   if (!Object.keys(activity.assets).length) delete activity.assets;

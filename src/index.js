@@ -5,7 +5,9 @@ import { ArtworkHost } from './artwork.js';
 import { CACHE_DIR } from './config.js';
 import { DiscordRPC } from './discord.js';
 import { MusicWatcher, dumpCurrentArtwork, isCatalogTrack } from './music.js';
-import { buildActivity, describe } from './presence.js';
+import { buildActivity, buildWatchActivity, describe } from './presence.js';
+import { TvWatcher, episodeCode } from './tv.js';
+import { TvCatalog } from './tvcatalog.js';
 import log from './log.js';
 
 export class YanPresence {
@@ -19,11 +21,33 @@ export class YanPresence {
       artworkSize: config.artworkSize,
     });
     this.artwork = new ArtworkHost({ config, cacheDir: CACHE_DIR });
-    this.rpc = new DiscordRPC({ clientId: config.clientId });
+    this.rpcClientId = config.clientId;
+    this.rpc = new DiscordRPC({ clientId: this.rpcClientId });
     this.watcher = new MusicWatcher({
       pollIntervalMs: config.pollIntervalMs,
       idlePollIntervalMs: config.idlePollIntervalMs,
     });
+
+    // TV.app is a second, independent source. Only one can hold the presence
+    // at a time -- see pickSource().
+    this.tvEnabled = Boolean(config.tv?.enabled);
+    this.tvWatcher = this.tvEnabled
+      ? new TvWatcher({
+          pollIntervalMs: config.pollIntervalMs,
+          idlePollIntervalMs: config.idlePollIntervalMs,
+        })
+      : null;
+    this.tvCatalog = this.tvEnabled
+      ? new TvCatalog({
+          storefront: config.storefront,
+          cacheDir: CACHE_DIR,
+          artworkSize: config.artworkSize,
+        })
+      : null;
+    this.tvSnapshot = null;
+    this.musicSnapshot = null;
+    this.tvArtworkUrl = null;
+    this.source = null; // 'music' | 'tv' | null
 
     // Everything about the track Discord is currently being told about.
     this.currentKey = null;
@@ -56,7 +80,12 @@ export class YanPresence {
     this.watcher.on('state', (snapshot) => this.onSnapshot(snapshot));
     this.watcher.start();
 
-    log.info('Watching Music.app');
+    if (this.tvWatcher) {
+      this.tvWatcher.on('state', (snapshot) => this.onTvSnapshot(snapshot));
+      this.tvWatcher.start();
+    }
+
+    log.info(this.tvWatcher ? 'Watching Music.app and TV.app' : 'Watching Music.app');
     if (!this.artwork.canHost) {
       log.info(
         `No artwork hosting configured — album art will be static ${this.config.artworkSize}x${this.config.artworkSize}. ` +
@@ -67,6 +96,7 @@ export class YanPresence {
 
   stop() {
     this.watcher.stop();
+    this.tvWatcher?.stop();
     clearTimeout(this.flushTimer);
     clearTimeout(this.clearTimer);
     clearTimeout(this.hideTimer);
@@ -84,7 +114,86 @@ export class YanPresence {
 
   /* ------------------------------------------------------------------ */
 
+  /* ---- TV.app ------------------------------------------------------- */
+
+  onTvSnapshot(snapshot) {
+    this.tvSnapshot = snapshot;
+
+    if (!snapshot.active) {
+      if (this.tvKey !== null) {
+        this.tvKey = null;
+        this.tvItem = null;
+        this.tvState = snapshot.state;
+        this.tvStartedAt = null;
+        // Music may be waiting to take over; if nothing is, the music clear
+        // path takes the presence down.
+        this.render();
+      }
+      return;
+    }
+
+    const { item, state, receivedAt } = snapshot;
+
+    if (item.key !== this.tvKey) {
+      const code = episodeCode(item);
+      log.info(
+        `Now ${state}: ${item.show ? `${item.show} — ` : ''}${item.name}${code ? ` (${code})` : ''}`
+      );
+      this.tvKey = item.key;
+      this.tvItem = item;
+      this.tvState = state;
+      this.tvStartedAt = state === 'playing' ? receivedAt - item.position * 1000 : null;
+      this.tvArtworkUrl = null;
+      this.cancelHide();
+      this.render();
+      this.enrichTv(item).catch((err) => log.debug(`TV enrichment failed: ${err.message}`));
+      return;
+    }
+
+    this.tvItem = item;
+    const stateChanged = state !== this.tvState;
+    this.tvState = state;
+
+    if (state === 'paused') {
+      this.tvStartedAt = null;
+      if (stateChanged) this.render();
+      return;
+    }
+
+    const predicted = this.tvStartedAt === null ? null : (receivedAt - this.tvStartedAt) / 1000;
+    const drifted =
+      predicted === null || Math.abs(predicted - item.position) > this.config.seekToleranceSec;
+
+    if (drifted) {
+      this.tvStartedAt = receivedAt - item.position * 1000;
+      this.render();
+    } else if (stateChanged) {
+      this.render();
+    }
+  }
+
+  /**
+   * Artwork for what TV.app is playing, from the backend behind tv.apple.com.
+   * Keyed on the show, so a binge costs one lookup. Apple TV+ titles resolve;
+   * Store purchases do not appear in that search and keep the placeholder.
+   */
+  async enrichTv(item) {
+    if (!this.tvCatalog) return;
+    const key = item.key;
+    const result = await this.tvCatalog.lookup(item);
+    if (!result?.artworkUrl) return;
+    if (this.tvKey !== key) return; // moved on while we were looking
+
+    this.tvArtworkUrl = result.artworkUrl;
+    log.debug(`TV artwork for ${result.title}: ${result.artworkUrl}`);
+    this.render();
+  }
+
+  /* ---- Music.app ---------------------------------------------------- */
+
   onSnapshot(snapshot) {
+    this.musicSnapshot = snapshot;
+
     if (!snapshot.active) {
       this.onInactive(snapshot.state);
       return;
@@ -143,6 +252,12 @@ export class YanPresence {
       this.startedAt = null;
       this.catalogResult = null;
       this.artworkUrl = null;
+      // TV.app may be holding the presence; Music going quiet must not pull it
+      // out from under it.
+      if (this.pickSource() === 'tv') {
+        this.render();
+        return;
+      }
       log.info(`Music.app is ${state}; clearing presence`);
       this.queue(null);
     }, this.config.clearDelayMs);
@@ -225,7 +340,48 @@ export class YanPresence {
 
   /* ------------------------------------------------------------------ */
 
+  /**
+   * Only one source can hold the presence. Whatever is actually playing wins,
+   * and video beats audio when both are: you cannot really watch and listen at
+   * the same time, so the picture is what you are doing.
+   */
+  pickSource() {
+    const tvPlaying = this.tvSnapshot?.active && this.tvSnapshot.state === 'playing';
+    const musicPlaying = this.musicSnapshot?.active && this.musicSnapshot.state === 'playing';
+    if (tvPlaying) return 'tv';
+    if (musicPlaying) return 'music';
+    if (this.tvSnapshot?.active) return 'tv';
+    if (this.musicSnapshot?.active) return 'music';
+    return null;
+  }
+
   render() {
+    const source = this.pickSource();
+    if (source === 'tv') return this.renderTv();
+    return this.renderMusic();
+  }
+
+  renderTv() {
+    if (!this.tvItem) return;
+
+    if (this.tvState === 'paused' && !this.config.showWhenPaused) {
+      this.scheduleHide();
+      return;
+    }
+    this.cancelHide();
+
+    this.queue(
+      buildWatchActivity({
+        item: this.tvItem,
+        state: this.tvState,
+        artworkUrl: this.tvArtworkUrl ?? null,
+        config: this.config,
+        startedAt: this.tvStartedAt,
+      })
+    );
+  }
+
+  renderMusic() {
     if (!this.currentTrack) return;
 
     if (this.currentState === 'paused' && !this.config.showWhenPaused) {
@@ -257,8 +413,16 @@ export class YanPresence {
     // Nothing is on screen (never sent, already cleared, or a fresh Discord
     // connection), so there is nothing to take down.
     if (this.hideTimer || this.lastSentJson === null || this.lastSentJson === 'null') return;
+    // Remembered so the timer can tell "still the same paused source" from
+    // "the other source started playing while we waited".
+    this.pausedSource = this.pickSource();
     this.hideTimer = setTimeout(() => {
       this.hideTimer = null;
+      // The other source may have started while we were waiting to hide.
+      if (this.pickSource() && this.pickSource() !== this.pausedSource) {
+        this.render();
+        return;
+      }
       log.debug('Paused; hiding presence');
       this.queue(null);
     }, this.config.clearDelayMs);
@@ -297,11 +461,54 @@ export class YanPresence {
     this.flushTimer.unref?.();
   }
 
+  /**
+   * Discord binds `client_id` at handshake, and the card's header comes from
+   * that application's name -- which is the whole reason the Music app is
+   * named "Apple Music". Showing "Watching Apple TV" therefore needs a second
+   * application, and switching to it means reconnecting. Falls back to the one
+   * client when `tv.clientId` is unset, in which case the header is wrong but
+   * everything else works.
+   */
+  async ensureRpcFor(activity) {
+    if (this.dryRun) return true;
+
+    const wantId =
+      activity?.type === 3 && this.config.tv?.clientId
+        ? this.config.tv.clientId
+        : this.config.clientId;
+
+    if (wantId === this.rpcClientId) return this.rpc.ready;
+
+    log.debug(`Switching Discord application to ${wantId}`);
+    try {
+      if (this.rpc.ready) await this.rpc.clearActivity();
+    } catch {
+      /* going away anyway */
+    }
+    this.rpc.destroy();
+
+    this.rpcClientId = wantId;
+    this.rpc = new DiscordRPC({ clientId: wantId });
+    this.rpc.on('ready', () => {
+      this.lastSentJson = null;
+      this.render();
+    });
+    this.rpc.connect();
+    // The pending activity is replayed by the `ready` handler.
+    return false;
+  }
+
   async flush() {
     if (this.pendingActivity === undefined) return;
 
     const activity = this.pendingActivity;
     this.pendingActivity = undefined;
+
+    if (!(await this.ensureRpcFor(activity))) {
+      // Reconnecting under a different application; `ready` will re-render.
+      if (activity !== null) this.lastSentJson = null;
+      return;
+    }
 
     const json = JSON.stringify(activity);
     if (json === this.lastSentJson) return;

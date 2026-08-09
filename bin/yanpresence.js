@@ -8,6 +8,7 @@ import { ArtworkHost } from '../src/artwork.js';
 import { CACHE_DIR, PROJECT_ROOT, SUPPORT_DIR, configPaths, loadConfig, validateConfig } from '../src/config.js';
 import { DiscordRPC } from '../src/discord.js';
 import { MusicWatcher } from '../src/music.js';
+import { TvWatcher, episodeCode } from '../src/tv.js';
 import { YanPresence } from '../src/index.js';
 import log, { setLevel } from '../src/log.js';
 
@@ -271,6 +272,54 @@ async function cmdDoctor(config) {
     ok('Music.app', `${music.state}: ${music.track.name} — ${music.track.artist}`);
   } else {
     ok('Music.app', `running, player state "${music.state}"`);
+  }
+
+  // --- TV.app ----------------------------------------------------------
+  if (!config.tv?.enabled) {
+    rows.push(['info', 'Apple TV', 'disabled in config (set tv.enabled to true)']);
+  } else {
+    const tv = await new Promise((resolve) => {
+      const watcher = new TvWatcher({ pollIntervalMs: 500 });
+      const timer = setTimeout(() => {
+        watcher.stop();
+        resolve(null);
+      }, 12000);
+      watcher.on('state', (snapshot) => {
+        clearTimeout(timer);
+        watcher.stop();
+        resolve(snapshot);
+      });
+      watcher.start();
+    });
+
+    if (!tv) {
+      bad(
+        'Apple TV',
+        'no response from the watcher. macOS may be waiting on an automation prompt — check\n' +
+          '      System Settings › Privacy & Security › Automation and allow your terminal to control TV.'
+      );
+    } else if (tv.state === 'closed') {
+      warn('Apple TV', 'not running (that is fine — start it and presence will follow)');
+    } else if (tv.active) {
+      const code = episodeCode(tv.item);
+      ok(
+        'Apple TV',
+        `${tv.state}: ${tv.item.show ? `${tv.item.show} — ` : ''}${tv.item.name}${code ? ` (${code})` : ''}`
+      );
+    } else {
+      ok('Apple TV', `running, player state "${tv.state}"`);
+    }
+
+    if (!config.tv.clientId) {
+      warn(
+        'Apple TV header',
+        'tv.clientId is empty, so shows are announced through the Apple Music application\n' +
+          '      and the card reads "Watching Apple Music". Create a second Discord application\n' +
+          '      named "Apple TV" and paste its Application ID into tv.clientId.'
+      );
+    } else {
+      ok('Apple TV header', `separate application ${config.tv.clientId}`);
+    }
   }
 
   // --- Discord ---------------------------------------------------------
