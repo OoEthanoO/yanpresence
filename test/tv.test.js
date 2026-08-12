@@ -145,6 +145,67 @@ test('the season being watched gets its own artwork, with a show-level fallback'
   assert.match(cat.withCurrentSize(entry, 0).artworkUrl, /thumb\/SHOW\//);
 });
 
+test('the season square is read from previewFrame, not the show-level coverArt', async () => {
+  // The trap this pins: `data.showImages.coverArt` is the SHOW's square and is
+  // identical for every season, while the season's own square sits under
+  // `data.images.previewFrame`. Reading the key named "coverArt" yields the
+  // same image for every season and makes per-season art look nonexistent.
+  const cat = new TvCatalog({ storefront: 'ca', cacheDir: os.tmpdir(), artworkSize: 1024 });
+  cat.getJson = async () => ({
+    data: {
+      images: {
+        coverArt16X9: { url: 'https://x/thumb/WIDE/{w}x{h}.{f}', width: 3840, height: 2160 },
+        previewFrame: { url: 'https://x/thumb/SEASON/{w}x{h}.{f}', width: 3000, height: 3000 },
+      },
+      showImages: {
+        coverArt: { url: 'https://x/thumb/SHOW/{w}x{h}.{f}', width: 3000, height: 3000 },
+      },
+    },
+  });
+
+  const covers = await cat.seasonCover('umc.cmc.whatever', 'token');
+  assert.match(covers.season, /thumb\/SEASON\//, 'the season square, not the show one');
+  assert.match(covers.show, /thumb\/SHOW\//);
+});
+
+test('a non-square season asset is refused rather than matted', async () => {
+  // Seasons whose only art is 16:9 fall back to the show square, so the slot
+  // is never filled with something that needs black bars.
+  const cat = new TvCatalog({ storefront: 'ca', cacheDir: os.tmpdir(), artworkSize: 1024 });
+  cat.getJson = async () => ({
+    data: {
+      images: { previewFrame: { url: 'https://x/thumb/WIDE/{w}x{h}.{f}', width: 3840, height: 2160 } },
+      showImages: { coverArt: { url: 'https://x/thumb/SHOW/{w}x{h}.{f}', width: 3000, height: 3000 } },
+    },
+  });
+
+  const covers = await cat.seasonCover('umc.cmc.whatever', 'token');
+  assert.equal(covers.season, null, 'a 16:9 asset is not a square');
+  assert.match(covers.show, /thumb\/SHOW\//);
+});
+
+test('a season miss is remembered so it is not refetched every episode', async () => {
+  const cat = new TvCatalog({ storefront: 'ca', cacheDir: os.tmpdir(), artworkSize: 1024 });
+  let calls = 0;
+  cat.getJson = async () => {
+    calls += 1;
+    return {
+      data: {
+        images: {},
+        showImages: { coverArt: { url: 'https://x/thumb/SHOW/{w}x{h}.{f}', width: 3000, height: 3000 } },
+      },
+    };
+  };
+
+  const entry = { id: 'umc.cmc.show', artworkTemplate: 'https://x/thumb/OLD/{w}x{h}.{f}', seasonIds: { 2: 'umc.cmc.s2' } };
+  await cat.ensureSeasonCover(entry, 2);
+  await cat.ensureSeasonCover(entry, 2);
+
+  assert.equal(calls, 1, 'the miss is cached, not re-requested');
+  assert.equal(entry.seasons[2], null);
+  assert.match(entry.artworkTemplate, /thumb\/SHOW\//, 'show fallback upgraded to the square');
+});
+
 test('resolved artwork replaces the placeholder', () => {
   const url = 'https://is1-ssl.mzstatic.com/image/thumb/abc/1024x1024bf.jpg';
   const a = buildWatchActivity({
