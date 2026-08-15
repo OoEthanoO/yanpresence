@@ -126,6 +126,20 @@ export const DEFAULTS = {
   // so clearing instantly would flicker the status between every song.
   clearDelayMs: 5000,
 
+  // How long a *pause* waits before the presence comes down, as opposed to a
+  // stop. null means "ask the source", because the two disagree about how
+  // trustworthy a pause is:
+  //
+  //   Music.app blips `paused` between tracks, so its pause needs the full
+  //     clearDelayMs to tell a real one from a gap between songs.
+  //   The web player does not: a track change arrives as its own state, and
+  //     the extension reports the pause the instant it happens. Five seconds
+  //     of "still listening" after you hit pause is simply wrong there, so it
+  //     defaults to 1.5s.
+  //
+  // Raise it if you ever see the status blink between tracks.
+  pauseClearDelayMs: null,
+
   // Which field Discord shows on the one-line status (member list, under your
   // name): "name" | "state" | "details". We put the song in `details`, so
   // "details" reproduces the Spotify layout with the song where Spotify puts

@@ -157,6 +157,11 @@
     }
   },
 
+  // How long a pause waits before the presence comes down, as opposed to a
+  // stop. null asks the source: clearDelayMs (5s) for Music.app, whose pause is
+  // ambiguous between tracks, and 1.5s for the web player, whose pause is not.
+  "pauseClearDelayMs": null,
+
   "showWhenPaused": false,
   "showSmallImage": true,
   "smallImageKey": "applemusic",

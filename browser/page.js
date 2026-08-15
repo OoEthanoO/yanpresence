@@ -30,6 +30,7 @@
 
   let lastSerialized = '';
   let idleReports = 0;
+  let hooked = false;
 
   /* --- 1. the player itself ---------------------------------------- */
 
@@ -181,7 +182,51 @@
     window.postMessage({ __yanpresence: 1, payload }, location.origin);
   }
 
-  setInterval(report, REPORT_MS);
+  /**
+   * Report the instant the player changes state, instead of up to a second
+   * later on the next tick. A pause the user can see is a pause Discord should
+   * already know about, and the timer is then only a safety net for anything
+   * that changes without saying so.
+   */
+  function hookPlayer() {
+    if (hooked) return;
+    const player = musicKitInstance();
+    const events = window.MusicKit?.Events;
+    if (!player?.addEventListener || !events) return;
+
+    hooked = true;
+    // Deliberately not playbackTimeDidChange: it fires several times a second
+    // and every one of those would be a post. The playhead is what the timer
+    // is for; these are the events the timer is too slow for.
+    for (const name of [
+      events.playbackStateDidChange,
+      events.nowPlayingItemDidChange,
+      events.mediaPlaybackError,
+    ]) {
+      if (!name) continue;
+      try {
+        player.addEventListener(name, report);
+      } catch {
+        /* one missing event is not worth losing the others over */
+      }
+    }
+  }
+
+  setInterval(() => {
+    // MusicKit is configured after the page loads, so the hook is attempted
+    // until it takes rather than once at start.
+    hookPlayer();
+    report();
+  }, REPORT_MS);
+
+  // play/pause/ended do not bubble, but a capturing listener on the document
+  // still sees them -- and they fire for whatever element MusicKit is using,
+  // without needing to know which one that is.
+  for (const type of ['play', 'pause', 'ended']) {
+    document.addEventListener(type, report, true);
+  }
   document.addEventListener('visibilitychange', report);
+
+  hookPlayer();
   report();
 })();

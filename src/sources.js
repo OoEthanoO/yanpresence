@@ -79,6 +79,14 @@ class AppleAppSources {
   }
 
   /**
+   * Music.app reports `paused` while it moves between tracks, so a pause here
+   * has to be held long enough to tell one from the other.
+   */
+  pauseDelayMs(config) {
+    return config.pauseClearDelayMs ?? config.clearDelayMs;
+  }
+
+  /**
    * Embedded artwork for a local library file. Catalog streams are skipped:
    * their cover is already on Apple's CDN, and pulling it out of Music.app
    * would cost an Apple Event for nothing.
@@ -168,6 +176,16 @@ class WebSources {
 
   idleMessage() {
     return 'Nothing is playing at music.apple.com';
+  }
+
+  /**
+   * A pause from the web player is a pause: the extension reports it the
+   * moment it happens, and a track change arrives as a different state
+   * entirely rather than as a momentary pause. So this need not sit through
+   * clearDelayMs, which exists for a Music.app quirk that does not apply.
+   */
+  pauseDelayMs(config) {
+    return config.pauseClearDelayMs ?? 1500;
   }
 
   begin() {

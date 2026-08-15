@@ -447,6 +447,7 @@ Cache and encoded artwork go beside it on macOS, and under
 | `minUpdateIntervalMs` | `2500` | Floor between `SET_ACTIVITY` frames; Discord rate-limits these. |
 | `seekToleranceSec` | `2` | Drift before a seek is assumed and the timeline is rebased. |
 | `clearDelayMs` | `5000` | How long playback must be non-playing — paused, stopped or quit — before the presence clears. Music.app blips `paused` between tracks, so clearing instantly would flicker the status between every song. Lower it for a snappier hide. |
+| `pauseClearDelayMs` | `null` | How long a *pause* waits, as opposed to a stop. `null` asks the source: `clearDelayMs` for Music.app, whose pause is ambiguous between tracks, and 1.5s for the web player, whose pause is not. |
 | `hosting.mode` | `"webhook"` | `webhook` (Discord-hosted, capped) or `command` (your own storage, uncapped). |
 | `hosting.webhookUrl` | — | Discord webhook URL, for `webhook` mode. |
 | `hosting.command` | — | Uploader command with `{file}` / `{name}`, for `command` mode. Must print the public URL. |
@@ -607,6 +608,19 @@ something to say; MPRIS covers whatever it does not.
 
 Firefox publishes no track length, so a Firefox-sourced track gets its duration
 from the catalog lookup instead — which is what puts the progress bar under it.
+
+### Pausing is quick here, deliberately
+
+The extension reports a pause the moment it happens — it listens for MusicKit's
+`playbackStateDidChange` and the media element's own `pause` event, rather than
+waiting up to a second for the next poll — and the presence comes down 1.5s
+later rather than after `clearDelayMs`.
+
+That shorter wait is specific to this source. The five-second default exists
+because Music.app reports `paused` while it moves between tracks, so a pause
+there cannot be distinguished from a gap between songs without waiting one out.
+The web player has no such quirk: a track change arrives as its own state.
+Raise `pauseClearDelayMs` if you ever do see the status blink between tracks.
 
 ### The `players` escape hatch
 

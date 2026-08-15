@@ -459,7 +459,7 @@ export class YanPresence {
       }
       log.debug('Paused; hiding presence');
       this.queue(null);
-    }, this.config.clearDelayMs);
+    }, this.sources.pauseDelayMs(this.config));
     this.hideTimer.unref?.();
   }
 

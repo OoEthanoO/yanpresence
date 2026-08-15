@@ -119,3 +119,23 @@ test('the album is the hover text, and the small badge is opt-out', () => {
     undefined
   );
 });
+
+test('a pause on the web player comes down fast; Music.app is given the benefit of the doubt', async () => {
+  const { createSources } = await import('../src/sources.js');
+  const { DEFAULTS } = await import('../src/config.js');
+
+  const config = { ...DEFAULTS, clearDelayMs: 5000, pauseClearDelayMs: null };
+
+  // Music.app blips `paused` between tracks, so it waits out clearDelayMs.
+  const apple = createSources({ ...config, source: 'apple-apps' });
+  assert.equal(apple.pauseDelayMs(config), 5000);
+
+  // The web player says what it means, and the extension says it immediately.
+  const web = createSources({ ...config, source: 'browser' });
+  assert.equal(web.pauseDelayMs(config), 1500);
+
+  // An explicit setting outranks both.
+  const pinned = { ...config, pauseClearDelayMs: 250 };
+  assert.equal(apple.pauseDelayMs(pinned), 250);
+  assert.equal(web.pauseDelayMs(pinned), 250);
+});
