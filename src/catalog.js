@@ -390,6 +390,9 @@ export class AppleCatalog {
       artworkBgColor: attrs.artwork?.bgColor ?? null,
       animatedUrl: null,
       isrc: attrs.isrc ?? null,
+      // The web players do not always report how long the song is; this is
+      // what puts a progress bar under those.
+      durationSec: attrs.durationInMillis ? attrs.durationInMillis / 1000 : 0,
     };
 
     // The song payload never carries editorialVideo; the album does.
@@ -522,7 +525,7 @@ export class AppleCatalog {
     const item = best.item;
     return {
       source: 'itunes',
-      score: chosen.entry.score,
+      score: best.score,
       songId: item.trackId ? String(item.trackId) : null,
       songName: item.trackName ?? track.name,
       songUrl: stripItunesParams(item.trackViewUrl),
@@ -536,6 +539,7 @@ export class AppleCatalog {
       artworkBgColor: null,
       // iTunes Search has no concept of motion artwork.
       animatedUrl: null,
+      durationSec: item.trackTimeMillis ? item.trackTimeMillis / 1000 : 0,
     };
   }
 }

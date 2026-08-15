@@ -6,13 +6,24 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export const PROJECT_ROOT = path.resolve(__dirname, '..');
-export const SUPPORT_DIR = path.join(
-  os.homedir(),
-  'Library',
-  'Application Support',
-  'yanpresence'
-);
-export const CACHE_DIR = path.join(SUPPORT_DIR, 'cache');
+
+// macOS keeps app data in one place; Linux splits it, and putting a cache under
+// ~/.config is the kind of thing that gets it backed up forever.
+export const SUPPORT_DIR =
+  process.platform === 'darwin'
+    ? path.join(os.homedir(), 'Library', 'Application Support', 'yanpresence')
+    : path.join(
+        process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'),
+        'yanpresence'
+      );
+
+export const CACHE_DIR =
+  process.platform === 'darwin'
+    ? path.join(SUPPORT_DIR, 'cache')
+    : path.join(
+        process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'),
+        'yanpresence'
+      );
 
 export const DEFAULTS = {
   // Discord application ID (Developer Portal -> your app -> Application ID).
@@ -27,6 +38,67 @@ export const DEFAULTS = {
 
   // Apple Music storefront used for catalog lookups and the links we attach.
   storefront: 'us',
+
+  // Where playback state comes from.
+  //
+  //   "auto"       -- pick by platform: Music.app/TV.app on macOS, the browser
+  //                   sources on Linux. Whatever is actually playing wins.
+  //   "apple-apps" -- Music.app and TV.app over Apple Events (macOS only).
+  //   "browser"    -- the Apple Music web player at music.apple.com, read
+  //                   over the extension bridge and/or MPRIS. Audio only:
+  //                   Apple TV is a TV.app source, so `tv` below is inert.
+  //
+  // "browser" works on Linux and on macOS: if you play in a browser there too,
+  // set it explicitly.
+  source: 'auto',
+
+  // The Apple Music web player, read two ways. Both feed the same pipeline,
+  // and both can be on at once -- the bridge wins when it has something,
+  // because it knows exactly which site is playing and MPRIS often does not.
+  //
+  // tv.apple.com is not read. Apple TV runs through TV.app on macOS, which
+  // reports the show, season and episode as fields; the web player offers an
+  // episode title and little else, and half a card is worse than none.
+  browser: {
+    // Local HTTP endpoint the companion extension posts playback state to.
+    // See browser/README.md. This is the only path that identifies the site
+    // under Chrome, which publishes no page URL over MPRIS.
+    bridge: {
+      enabled: true,
+      host: '127.0.0.1',
+      port: 8763,
+      // A tab that stops posting is treated as gone after this long. The
+      // extension posts every second while playing.
+      staleMs: 6000,
+      // Optional shared secret. Leave empty to accept any request that comes
+      // from a browser extension origin on the loopback interface; set it (and
+      // paste the same value into the extension's options) to require it.
+      token: '',
+    },
+
+    // MPRIS over the session bus: no install, but only useful where the
+    // browser publishes the page URL. Firefox does; Chrome does not, and its
+    // players are ignored unless you name them in `players` below.
+    mpris: {
+      enabled: true,
+      busctlPath: 'busctl',
+      // How often the bus is re-scanned for players appearing and disappearing.
+      discoverIntervalMs: 5000,
+      // Escape hatch for browsers that publish no xesam:url. Maps a fragment of
+      // the MPRIS bus name (or of the player's Identity) to "music" (assume it
+      // is Apple Music) or "ignore" (never report it).
+      //   { "chromium.instance": "music" }
+      //
+      // This does NOT rescue Apple Music in Chrome. Apple Music publishes no
+      // Media Session metadata to Chrome at all, so what arrives over MPRIS is
+      // the tab title ("Top All - Playlist - Apple Music") with no artist and
+      // no album -- mapping it would put that on your status line. Chrome
+      // needs the extension bridge. Mapping is for a browser that does publish
+      // usable metadata, and that you keep exclusively for Apple Music: with
+      // no URL to check, EVERY tab in it counts, YouTube included.
+      players: {},
+    },
+  },
 
   // How often the Music.app watcher reports state, in milliseconds.
   pollIntervalMs: 1000,
@@ -60,10 +132,11 @@ export const DEFAULTS = {
   // the artist.
   statusDisplay: 'details',
 
-  // Apple TV. TV.app is scripted through the same iTunes-descended dictionary
-  // as Music.app, so watching it costs one more resident osascript and
-  // nothing else. Only one source holds the presence at a time; whatever is
-  // actually playing wins, and video beats audio when both are.
+  // Apple TV, through TV.app on macOS. TV.app is scripted through the same
+  // iTunes-descended dictionary as Music.app, so watching it costs one more
+  // resident osascript and nothing else. Only one source holds the presence at
+  // a time; whatever is actually playing wins, and video beats audio when both
+  // are. Ignored when `source` resolves to "browser".
   tv: {
     enabled: false,
 
@@ -177,8 +250,8 @@ export const DEFAULTS = {
     // support all three, with animation (uploaded portal assets cannot animate
     // at all). AVIF is the default: smallest by a wide margin, best quality
     // per byte, single ffmpeg pass, and no extra tooling. If your Discord
-    // build shows it as a still image, switch to "webp" (needs `brew install
-    // webp` for img2webp).
+    // build shows it as a still image, switch to "webp" (needs img2webp:
+    // `brew install webp`, or `sudo apt install webp`).
     format: 'avif',
 
     // Square pixels. 1024 matches Discord's own recommended asset size, and
@@ -218,6 +291,37 @@ export const DEFAULTS = {
     ffmpegPath: 'ffmpeg',
     ffprobePath: 'ffprobe',
     img2webpPath: 'img2webp',
+
+    // GPU encoding. Off, and not for want of trying -- see src/gpu.js for the
+    // measurements. Short version: the AMD VAAPI AV1 encoder produces AVIF
+    // that ffmpeg reads back happily and Chromium refuses to decode, and
+    // Discord is Electron, so the card renders the grey "?" placeholder. Every
+    // variant failed, down to a single still frame. It also saved about a
+    // second on a job that runs once per album and is cached forever, and
+    // hardware *decode* measured slower than software on both GPUs.
+    //
+    // mode: "off" (default, CPU) | "auto" (also the CPU -- see above) |
+    //       "vaapi" (force the GPU: kept for other hardware, other drivers,
+    //       or a consumer that is not Chromium. Warns loudly when used.)
+    hardware: {
+      mode: 'off',
+
+      // Which VAAPI device: "auto" | "amd" | "intel" | "nvidia" | an explicit
+      // /dev/dri/renderD* path. "auto" prefers AMD, then Intel -- and picks by
+      // vendor, not by number, because renderD128 is the discrete NVIDIA card
+      // on plenty of laptops and it has no VAAPI encoder at all.
+      device: 'auto',
+
+      // Hardware decode, for every format including the CPU-encoded ones.
+      // Independent of `mode`, which governs the encode only. Measured slower
+      // than software here (4.9s NVDEC / 3.9s VAAPI / 2.9s software on a 20.6s
+      // master), so it is opt-in too.
+      decode: false,
+
+      // Override the CRF -> VAAPI global_quality conversion. null derives it
+      // from `crf` at the measured 3.5x that matches libsvtav1's output size.
+      globalQuality: null,
+    },
   },
 
   // Upload embedded artwork from local library files (not in Apple's catalog)
@@ -295,6 +399,24 @@ export function validateConfig(config) {
       'clientId is missing or malformed. Create an application at ' +
         'https://discord.com/developers/applications, name it "Apple Music", ' +
         'and copy its Application ID into your config.'
+    );
+  }
+  if (!['auto', 'apple-apps', 'browser'].includes(config.source)) {
+    problems.push(`source must be one of auto|apple-apps|browser (got ${config.source})`);
+  }
+  if (config.source === 'apple-apps' && process.platform !== 'darwin') {
+    problems.push(
+      'source is "apple-apps", which drives Music.app over Apple Events and needs macOS. ' +
+        'Use "browser" to read music.apple.com and tv.apple.com instead.'
+    );
+  }
+  const port = Number(config.browser?.bridge?.port);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    problems.push(`browser.bridge.port must be a port number (got ${config.browser?.bridge?.port})`);
+  }
+  if (!['auto', 'off', 'vaapi'].includes(config.animatedArtwork.hardware?.mode ?? 'auto')) {
+    problems.push(
+      `animatedArtwork.hardware.mode must be auto|off|vaapi (got ${config.animatedArtwork.hardware.mode})`
     );
   }
   if (!['name', 'state', 'details'].includes(config.statusDisplay)) {

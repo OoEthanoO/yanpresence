@@ -7,16 +7,60 @@
   // Apple Music storefront for catalog lookups and the links we attach.
   "storefront": "us",
 
+  // Where playback state comes from.
+  //   "auto"       -> Music.app/TV.app on macOS, the web players elsewhere
+  //   "apple-apps" -> Music.app and TV.app over Apple Events (macOS only)
+  //   "browser"    -> music.apple.com (audio only; Apple TV needs TV.app)
+  "source": "auto",
+
+  // The Apple Music web player. Read two ways, and both can be on at once: the
+  // extension bridge wins whenever it has something, because it knows exactly
+  // which site is playing.
+  //
+  // tv.apple.com is not read: Apple TV runs through TV.app on macOS, which
+  // reports show/season/episode as fields the web player does not offer.
+  //
+  //   bridge — the companion extension in browser/ posts here. This is the
+  //     only path that works in Chrome: Chrome publishes no page URL over
+  //     MPRIS, so nothing else can tell Apple Music from any other tab.
+  //     Install it with chrome://extensions -> Developer mode -> Load
+  //     unpacked -> the browser/ directory. See browser/README.md.
+  //
+  //   mpris — no install, reads the session bus. Firefox publishes the page
+  //     URL (xesam:url), so it is identified automatically. Chrome publishes
+  //     no URL, and for Apple Music no usable metadata either — the site sets
+  //     no Media Session metadata in Chrome, so the tab title arrives where
+  //     the song should be. Use the extension there.
+  //
+  //     "players" maps a bus-name fragment onto "music" or "ignore", for a
+  //     browser that does publish metadata and that you keep exclusively for
+  //     Apple Music — without a URL, every tab in it counts.
+  //       "players": { "chromium.instance": "music" }
+  "browser": {
+    "bridge": {
+      "enabled": true,
+      "host": "127.0.0.1",
+      "port": 8763,
+      "staleMs": 6000,
+      "token": ""
+    },
+    "mpris": {
+      "enabled": true,
+      "busctlPath": "busctl",
+      "discoverIntervalMs": 5000,
+      "players": {}
+    }
+  },
+
   // Which field Discord shows on the one-line status under your name.
   //   "details" -> the song  (this is the default, and what you probably want)
   //   "state"   -> the artist (what Spotify's own integration does)
   //   "name"    -> "Apple Music"
   "statusDisplay": "details",
 
-  // Apple TV. TV.app is scripted through the same iTunes-descended dictionary
-  // as Music.app, so this costs one more resident osascript and nothing else.
-  // Only one source holds the presence at a time: whatever is actually
-  // playing wins, and video beats audio when both are.
+  // Apple TV, through TV.app on macOS. Only one source holds the presence at a
+  // time: whatever is actually playing wins, and video beats audio when both
+  // are. Ignored when "source" resolves to "browser".
   //
   // clientId: Discord builds the card header from the *application* name, and
   //   one connection speaks for one application. Left empty, TV is announced
@@ -91,7 +135,26 @@
     "quality": 75,
     "onOversize": "degrade",
     "ffmpegPath": "ffmpeg",
-    "img2webpPath": "img2webp"
+    "img2webpPath": "img2webp",
+
+    // GPU encoding (Linux). Nothing to configure: devices are discovered,
+    // ffmpeg is asked what it can do, and anything that fails falls back to
+    // the CPU encoder with a warning.
+    //
+    // Decode and scale go to NVDEC on a discrete NVIDIA card when there is
+    // one. The AV1 encode for AVIF goes to VAAPI on an AMD or Intel GPU
+    // instead — NVENC does encode AV1 on Ada, but AV1-in-HEIF out of NVENC is
+    // not a supported combination.
+    //
+    // device: "auto" | "amd" | "intel" | "nvidia" | "/dev/dri/renderD129".
+    //   "auto" picks by vendor, not by number: renderD128 is the discrete
+    //   NVIDIA card on plenty of laptops, and it has no VAAPI encoder at all.
+    "hardware": {
+      "mode": "auto",
+      "device": "auto",
+      "decode": true,
+      "qp": null
+    }
   },
 
   "showWhenPaused": false,

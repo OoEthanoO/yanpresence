@@ -4,21 +4,24 @@ import path from 'node:path';
 import process from 'node:process';
 
 import { AppleCatalog } from '../src/catalog.js';
-import { ArtworkHost } from '../src/artwork.js';
+import { ArtworkHost, installHint } from '../src/artwork.js';
 import { CACHE_DIR, PROJECT_ROOT, SUPPORT_DIR, configPaths, loadConfig, validateConfig } from '../src/config.js';
 import { DiscordRPC } from '../src/discord.js';
-import { MusicWatcher } from '../src/music.js';
-import { TvWatcher, episodeCode } from '../src/tv.js';
+import { createSources, resolveSourceKind } from '../src/sources.js';
+import { episodeCode } from '../src/tv.js';
 import { YanPresence } from '../src/index.js';
 import log, { setLevel } from '../src/log.js';
 
 const USAGE = `
-yanpresence — Apple Music rich presence for Discord (macOS)
+yanpresence — Apple Music rich presence for Discord
+
+Reads Music.app and TV.app on macOS, and the Apple Music web player at
+music.apple.com on Linux. Pick explicitly with "source" in the config.
 
 Usage:
   yanpresence                 Start the presence daemon
   yanpresence --doctor        Check the setup and exit
-  yanpresence --watch         Print Music.app state without touching Discord
+  yanpresence --watch         Print playback state without touching Discord
   yanpresence --dry-run       Run the full pipeline, print the activity JSON
                               instead of sending it (no clientId needed)
   yanpresence --init          Write a starter config and print its path
@@ -83,9 +86,17 @@ function parseArgs(argv) {
   return flags;
 }
 
-function requireMac() {
-  if (process.platform !== 'darwin') {
-    console.error('yanpresence only runs on macOS — it drives Music.app over Apple Events.');
+/**
+ * Music.app and TV.app are scripted over Apple Events, which exist on macOS and
+ * nowhere else. The web players have no such constraint, so everything except
+ * that one source runs anywhere.
+ */
+function requirePlatform(config) {
+  if (resolveSourceKind(config) === 'apple-apps' && process.platform !== 'darwin') {
+    console.error(
+      'source is "apple-apps", which drives Music.app over Apple Events and needs macOS.\n' +
+        'Set "source" to "browser" to read music.apple.com and tv.apple.com instead.'
+    );
     process.exit(1);
   }
 }
@@ -228,38 +239,30 @@ async function cmdTestAssets(config) {
   console.log('\n  Done — presence cleared.');
 }
 
-async function cmdDoctor(config) {
-  const rows = [];
+/** Music.app and TV.app, over Apple Events. */
+async function doctorAppleApps(config, rows) {
   const ok = (label, detail) => rows.push(['ok', label, detail]);
   const warn = (label, detail) => rows.push(['warn', label, detail]);
   const bad = (label, detail) => rows.push(['fail', label, detail]);
 
-  ok('platform', `${process.platform} ${process.arch}, node ${process.version}`);
+  const { MusicWatcher } = await import('../src/music.js');
+  const { TvWatcher } = await import('../src/tv.js');
 
-  rows.push(['info', 'config', config.__source ?? `none found (using defaults)`]);
-  if (!config.__source) {
-    warn('config', `looked in:\n      ${configPaths().join('\n      ')}`);
-  }
-
-  const problems = validateConfig(config);
-  if (problems.length) problems.forEach((p) => bad('config', p));
-  else ok('clientId', String(config.clientId));
-
-  // --- Music.app -------------------------------------------------------
-  const music = await new Promise((resolve) => {
-    const watcher = new MusicWatcher({ pollIntervalMs: 500 });
-    const timer = setTimeout(() => {
-      watcher.stop();
-      resolve(null);
-    }, 12000);
-    watcher.on('state', (snapshot) => {
-      clearTimeout(timer);
-      watcher.stop();
-      resolve(snapshot);
+  const first = (watcher) =>
+    new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        watcher.stop();
+        resolve(null);
+      }, 12000);
+      watcher.on('state', (snapshot) => {
+        clearTimeout(timer);
+        watcher.stop();
+        resolve(snapshot);
+      });
+      watcher.start();
     });
-    watcher.start();
-  });
 
+  const music = await first(new MusicWatcher({ pollIntervalMs: 500 }));
   if (!music) {
     bad(
       'Music.app',
@@ -274,53 +277,184 @@ async function cmdDoctor(config) {
     ok('Music.app', `running, player state "${music.state}"`);
   }
 
-  // --- TV.app ----------------------------------------------------------
   if (!config.tv?.enabled) {
     rows.push(['info', 'Apple TV', 'disabled in config (set tv.enabled to true)']);
+    return;
+  }
+
+  const tv = await first(new TvWatcher({ pollIntervalMs: 500 }));
+  if (!tv) {
+    bad(
+      'Apple TV',
+      'no response from the watcher. macOS may be waiting on an automation prompt — check\n' +
+        '      System Settings › Privacy & Security › Automation and allow your terminal to control TV.'
+    );
+  } else if (tv.state === 'closed') {
+    warn('Apple TV', 'not running (that is fine — start it and presence will follow)');
+  } else if (tv.active) {
+    const code = episodeCode(tv.item);
+    ok(
+      'Apple TV',
+      `${tv.state}: ${tv.item.show ? `${tv.item.show} — ` : ''}${tv.item.name}${code ? ` (${code})` : ''}`
+    );
   } else {
-    const tv = await new Promise((resolve) => {
-      const watcher = new TvWatcher({ pollIntervalMs: 500 });
-      const timer = setTimeout(() => {
-        watcher.stop();
-        resolve(null);
-      }, 12000);
-      watcher.on('state', (snapshot) => {
-        clearTimeout(timer);
-        watcher.stop();
-        resolve(snapshot);
+    ok('Apple TV', `running, player state "${tv.state}"`);
+  }
+
+  doctorTvHeader(config, rows);
+}
+
+/**
+ * The web players: the extension bridge and MPRIS, checked separately because
+ * they fail separately and for different reasons.
+ */
+async function doctorBrowser(config, rows) {
+  const ok = (label, detail) => rows.push(['ok', label, detail]);
+  const warn = (label, detail) => rows.push(['warn', label, detail]);
+  const bad = (label, detail) => rows.push(['fail', label, detail]);
+  const info = (label, detail) => rows.push(['info', label, detail]);
+
+  const bridgeCfg = config.browser?.bridge ?? {};
+  const mprisCfg = config.browser?.mpris ?? {};
+
+  // --- extension bridge ---
+  if (bridgeCfg.enabled === false) {
+    info('extension bridge', 'disabled in config (browser.bridge.enabled)');
+  } else {
+    const url = `http://${bridgeCfg.host ?? '127.0.0.1'}:${bridgeCfg.port ?? 8763}`;
+    const running = await fetch(`${url}/health`, { signal: AbortSignal.timeout(2000) })
+      .then((res) => res.json())
+      .catch(() => null);
+
+    if (running?.app === 'yanpresence') {
+      ok('extension bridge', `already listening at ${url} — ${running.tabs} tab(s) reporting`);
+    } else {
+      // Nothing is listening, so hold the port ourselves for a moment and see
+      // whether an installed extension says anything.
+      const { BridgeSource } = await import('../src/bridge.js');
+      const bridge = new BridgeSource({
+        host: bridgeCfg.host,
+        port: bridgeCfg.port,
+        staleMs: bridgeCfg.staleMs,
+        token: bridgeCfg.token,
       });
-      watcher.start();
-    });
+      bridge.start();
+      const heard = await new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(false), 6000);
+        const onState = (snapshot) => {
+          if (!snapshot.active) return;
+          clearTimeout(timer);
+          resolve(true);
+        };
+        bridge.on('music', onState);
+        bridge.on('tv', onState);
+      });
+      bridge.stop();
 
-    if (!tv) {
-      bad(
-        'Apple TV',
-        'no response from the watcher. macOS may be waiting on an automation prompt — check\n' +
-          '      System Settings › Privacy & Security › Automation and allow your terminal to control TV.'
-      );
-    } else if (tv.state === 'closed') {
-      warn('Apple TV', 'not running (that is fine — start it and presence will follow)');
-    } else if (tv.active) {
-      const code = episodeCode(tv.item);
-      ok(
-        'Apple TV',
-        `${tv.state}: ${tv.item.show ? `${tv.item.show} — ` : ''}${tv.item.name}${code ? ` (${code})` : ''}`
-      );
-    } else {
-      ok('Apple TV', `running, player state "${tv.state}"`);
-    }
-
-    if (!config.tv.clientId) {
-      warn(
-        'Apple TV header',
-        'tv.clientId is empty, so shows are announced through the Apple Music application\n' +
-          '      and the card reads "Watching Apple Music". Create a second Discord application\n' +
-          '      named "Apple TV" and paste its Application ID into tv.clientId.'
-      );
-    } else {
-      ok('Apple TV header', `separate application ${config.tv.clientId}`);
+      if (heard) ok('extension bridge', `${url} — the extension is installed and reporting`);
+      else {
+        warn(
+          'extension bridge',
+          `nothing reported to ${url} in 6s. That is expected if nothing is playing;\n` +
+            '      otherwise load the extension from browser/ (see browser/README.md).\n' +
+            '      Chrome cannot identify Apple Music over MPRIS, so it needs this.'
+        );
+      }
     }
   }
+
+  // --- MPRIS ---
+  if (process.platform !== 'linux') {
+    info('MPRIS', 'not used on this platform');
+  } else if (mprisCfg.enabled === false) {
+    info('MPRIS', 'disabled in config (browser.mpris.enabled)');
+  } else {
+    const { MprisSource } = await import('../src/mpris.js');
+    const mpris = new MprisSource({
+      busctlPath: mprisCfg.busctlPath,
+      players: mprisCfg.players,
+      discoverIntervalMs: mprisCfg.discoverIntervalMs,
+    });
+    await mpris.discover();
+
+    if (mpris.available === false) {
+      bad('MPRIS', `could not run "${mprisCfg.busctlPath ?? 'busctl'}" — set browser.mpris.busctlPath`);
+    } else if (!mpris.names.length) {
+      info('MPRIS', 'no media players on the session bus (nothing is playing anywhere)');
+    } else {
+      for (const name of mpris.names) {
+        const reading = await mpris.read(name);
+        const label = (await mpris.identityOf(name)) || name.replace('org.mpris.MediaPlayer2.', '');
+        if (!reading) {
+          warn('MPRIS', `${label}: unreadable. Snap-packaged browsers only answer unconfined\n` +
+            '      callers — run yanpresence from a terminal or the systemd user service.');
+        } else if (reading.kind) {
+          ok('MPRIS', `${label}: Apple Music, ${reading.state}`);
+        } else {
+          info(
+            'MPRIS',
+            `${label}: playing something that does not identify itself as Apple.\n` +
+              '      Chrome publishes no page URL, so use the extension bridge (or map it in\n' +
+              '      browser.mpris.players) — guessing here would announce every tab as Apple Music.'
+          );
+        }
+      }
+    }
+  }
+
+  // Apple TV is a TV.app source, so there is nothing to check here -- but a
+  // config shared with a Mac will have it switched on, and silence about that
+  // reads as a fault.
+  rows.push([
+    'info',
+    'Apple TV',
+    config.tv?.enabled
+      ? 'enabled in config, and inert on this source — Apple TV runs through TV.app on macOS'
+      : 'not applicable to the browser source (Apple TV runs through TV.app on macOS)',
+  ]);
+}
+
+/** Shared between the sources: video needs its own Discord application. */
+function doctorTvHeader(config, rows) {
+  if (!config.tv?.clientId) {
+    rows.push([
+      'warn',
+      'Apple TV header',
+      'tv.clientId is empty, so shows are announced through the Apple Music application\n' +
+        '      and the card reads "Watching Apple Music". Create a second Discord application\n' +
+        '      named "Apple TV" and paste its Application ID into tv.clientId.',
+    ]);
+  } else {
+    rows.push(['ok', 'Apple TV header', `separate application ${config.tv.clientId}`]);
+  }
+}
+
+async function cmdDoctor(config) {
+  const rows = [];
+  const ok = (label, detail) => rows.push(['ok', label, detail]);
+  const warn = (label, detail) => rows.push(['warn', label, detail]);
+  const bad = (label, detail) => rows.push(['fail', label, detail]);
+
+  ok('platform', `${process.platform} ${process.arch}, node ${process.version}`);
+  ok(
+    'source',
+    resolveSourceKind(config) === 'browser'
+      ? 'browser — music.apple.com and tv.apple.com'
+      : 'apple-apps — Music.app and TV.app'
+  );
+
+  rows.push(['info', 'config', config.__source ?? `none found (using defaults)`]);
+  if (!config.__source) {
+    warn('config', `looked in:\n      ${configPaths().join('\n      ')}`);
+  }
+
+  const problems = validateConfig(config);
+  if (problems.length) problems.forEach((p) => bad('config', p));
+  else ok('clientId', String(config.clientId));
+
+  // --- playback source -------------------------------------------------
+  if (resolveSourceKind(config) === 'apple-apps') await doctorAppleApps(config, rows);
+  else await doctorBrowser(config, rows);
 
   // --- Discord ---------------------------------------------------------
   const sockets = DiscordRPC.candidateSockets().filter((p) => {
@@ -387,11 +521,15 @@ async function cmdDoctor(config) {
           : 'no hosting.webhookUrl — album art will be static.'
     );
   } else if (!tools.ffmpeg) {
-    bad('animated artwork', `ffmpeg not found at "${config.animatedArtwork.ffmpegPath}" (brew install ffmpeg)`);
+    bad(
+      'animated artwork',
+      `ffmpeg not found at "${config.animatedArtwork.ffmpegPath}" — ${installHint('ffmpeg')}.\n` +
+        '      Album art still works without it; only the animated covers need it.'
+    );
   } else if (format === 'webp' && !tools.img2webp) {
     bad(
       'animated artwork',
-      `img2webp not found at "${config.animatedArtwork.img2webpPath}" (brew install webp),\n` +
+      `img2webp not found at "${config.animatedArtwork.img2webpPath}" — ${installHint('webp')},\n` +
         '      or set animatedArtwork.format to "avif"'
     );
   } else {
@@ -402,6 +540,40 @@ async function cmdDoctor(config) {
       'animated artwork',
       `${format} · ${config.animatedArtwork.size}px · ${config.animatedArtwork.fps}fps · ${duration}`
     );
+
+    // --- GPU ---
+    const { describeHardware, planAvif } = await import('../src/gpu.js');
+    const hw = await artwork.hardware();
+    const summary = describeHardware(hw);
+    rows.push(['info', 'GPU devices', summary.devices]);
+
+    if (config.animatedArtwork.hardware?.mode === 'off') {
+      rows.push(['info', 'GPU encoding', 'disabled in config (animatedArtwork.hardware.mode)']);
+    } else if (!hw.capabilities.available) {
+      warn('GPU encoding', 'could not ask ffmpeg what it supports — encoding will use the CPU');
+    } else {
+      const plan =
+        format === 'avif'
+          ? planAvif({
+              capabilities: hw.capabilities,
+              nodes: hw.nodes,
+              nvidia: hw.nvidia,
+              config: config.animatedArtwork.hardware ?? {},
+              crf: config.animatedArtwork.crf,
+            })
+          : null;
+
+      if (plan) ok('GPU encoding', `${plan.label} · decode ${plan.input.includes('cuda') ? 'on NVDEC' : 'in software'}`);
+      else if (format === 'avif') {
+        warn(
+          'GPU encoding',
+          `no usable hardware AV1 encoder (have: ${summary.encoders}); encoding on the CPU.\n` +
+            '      VAAPI AV1 needs an AMD or Intel GPU and an ffmpeg built with av1_vaapi.'
+        );
+      } else {
+        rows.push(['info', 'GPU encoding', `${format} has no hardware encoder; only decode is accelerated`]);
+      }
+    }
     if (config.hosting.mode === 's3') {
       // Prove the credentials by actually round-tripping a small object: a
       // config that merely looks complete tells you nothing.
@@ -454,21 +626,42 @@ async function cmdDoctor(config) {
 }
 
 async function cmdWatch(config) {
-  const watcher = new MusicWatcher({ pollIntervalMs: config.pollIntervalMs });
-  watcher.on('state', (snapshot) => {
+  // TV is normally opt-in, but --watch is a diagnostic: on macOS, showing both
+  // sources is the point of running it. The browser source has no TV channel.
+  const sources = createSources({ ...config, tv: { ...config.tv, enabled: true } });
+  console.log(`  ${sources.describe()}\n`);
+
+  sources.music.on('state', (snapshot) => {
     if (!snapshot.active) {
-      console.log(`[${snapshot.state}]`);
+      console.log(`[music ${snapshot.state}]`);
       return;
     }
     const t = snapshot.track;
     console.log(
-      `[${snapshot.state}] ${t.name} — ${t.artist} · ${t.album} ` +
-        `(${t.position.toFixed(1)}/${t.duration.toFixed(1)}s) kind="${t.kind}"`
+      `[music ${snapshot.state}] ${t.name} — ${t.artist} · ${t.album} ` +
+        `(${t.position.toFixed(1)}/${t.duration.toFixed(1)}s) via ${t.origin || t.kind}`
     );
   });
-  watcher.start();
+
+  sources.tv?.on('state', (snapshot) => {
+    if (!snapshot.active) {
+      console.log(`[tv ${snapshot.state}]`);
+      return;
+    }
+    const i = snapshot.item;
+    const code = episodeCode(i);
+    console.log(
+      `[tv ${snapshot.state}] ${i.show ? `${i.show} — ` : ''}${i.name}${code ? ` (${code})` : ''} ` +
+        `(${i.position.toFixed(1)}/${i.duration.toFixed(1)}s) via ${i.origin || i.kind}`
+    );
+  });
+
+  sources.music.start();
+  sources.tv?.start();
+
   process.on('SIGINT', () => {
-    watcher.stop();
+    sources.music.stop();
+    sources.tv?.stop();
     process.exit(0);
   });
 }
@@ -481,14 +674,13 @@ async function main() {
     return;
   }
 
-  requireMac();
-
   if (flags.init) return cmdInit();
   if (flags.cache) return cmdCache();
   if (flags.clearCache) return cmdClearCache();
 
   const config = loadConfig();
   setLevel(flags.logLevel ?? config.logLevel);
+  requirePlatform(config);
 
   if (flags.doctor) return cmdDoctor(config);
   if (flags.testAssets) return cmdTestAssets(config);

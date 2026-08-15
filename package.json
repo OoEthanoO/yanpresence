@@ -1,7 +1,7 @@
 {
   "name": "yanpresence",
   "version": "1.0.0",
-  "description": "Apple Music -> Discord Rich Presence for macOS",
+  "description": "Apple Music -> Discord Rich Presence for macOS and Linux",
   "type": "module",
   "bin": {
     "yanpresence": "./bin/yanpresence.js"
@@ -12,13 +12,16 @@
     "test": "node --test test/*.test.js",
     "doctor": "node bin/yanpresence.js --doctor",
     "install-agent": "bash launchd/install.sh",
-    "uninstall-agent": "bash launchd/uninstall.sh"
+    "uninstall-agent": "bash launchd/uninstall.sh",
+    "install-service": "bash systemd/install.sh",
+    "uninstall-service": "bash systemd/uninstall.sh"
   },
   "engines": {
     "node": ">=18"
   },
   "os": [
-    "darwin"
+    "darwin",
+    "linux"
   ],
   "license": "MIT",
   "private": true

@@ -4,9 +4,9 @@ import { AppleCatalog } from './catalog.js';
 import { ArtworkHost } from './artwork.js';
 import { CACHE_DIR } from './config.js';
 import { DiscordRPC } from './discord.js';
-import { MusicWatcher, dumpCurrentArtwork, isCatalogTrack } from './music.js';
 import { buildActivity, buildWatchActivity, describe } from './presence.js';
-import { TvWatcher, episodeCode } from './tv.js';
+import { createSources } from './sources.js';
+import { episodeCode } from './tv.js';
 import { TvCatalog } from './tvcatalog.js';
 import log from './log.js';
 
@@ -23,20 +23,18 @@ export class YanPresence {
     this.artwork = new ArtworkHost({ config, cacheDir: CACHE_DIR });
     this.rpcClientId = config.clientId;
     this.rpc = new DiscordRPC({ clientId: this.rpcClientId });
-    this.watcher = new MusicWatcher({
-      pollIntervalMs: config.pollIntervalMs,
-      idlePollIntervalMs: config.idlePollIntervalMs,
-    });
 
-    // TV.app is a second, independent source. Only one can hold the presence
+    // Music.app and TV.app on macOS; the web players everywhere else. Both
+    // hand back the same snapshots, so nothing below this line knows which.
+    this.sources = createSources(config);
+    this.watcher = this.sources.music;
+
+    // Video is a second, independent source. Only one can hold the presence
     // at a time -- see pickSource().
-    this.tvEnabled = Boolean(config.tv?.enabled);
-    this.tvWatcher = this.tvEnabled
-      ? new TvWatcher({
-          pollIntervalMs: config.pollIntervalMs,
-          idlePollIntervalMs: config.idlePollIntervalMs,
-        })
-      : null;
+    // Config may ask for TV on a platform whose source cannot serve it; what
+    // decides is whether the source produced a channel.
+    this.tvWatcher = this.sources.tv;
+    this.tvEnabled = Boolean(config.tv?.enabled && this.tvWatcher);
     this.tvCatalog = this.tvEnabled
       ? new TvCatalog({
           storefront: config.storefront,
@@ -85,7 +83,7 @@ export class YanPresence {
       this.tvWatcher.start();
     }
 
-    log.info(this.tvWatcher ? 'Watching Music.app and TV.app' : 'Watching Music.app');
+    log.info(this.sources.describe());
     if (!this.artwork.canHost) {
       log.info(
         `No artwork hosting configured — album art will be static ${this.config.artworkSize}x${this.config.artworkSize}. ` +
@@ -181,12 +179,23 @@ export class YanPresence {
     if (!this.tvCatalog) return;
     const key = item.key;
     const result = await this.tvCatalog.lookup(item);
-    if (!result?.artworkUrl) return;
     if (this.tvKey !== key) return; // moved on while we were looking
 
-    this.tvArtworkUrl = result.artworkUrl;
-    log.debug(`TV artwork for ${result.title}: ${result.artworkUrl}`);
-    this.render();
+    if (result?.artworkUrl) {
+      this.tvArtworkUrl = result.artworkUrl;
+      log.debug(`TV artwork for ${result.title}: ${result.artworkUrl}`);
+      this.render();
+      return;
+    }
+
+    // The web player publishes its own poster through the Media Session API,
+    // which covers what the catalog search cannot resolve.
+    const fromPage = webArtwork(item);
+    if (fromPage) {
+      this.tvArtworkUrl = fromPage;
+      log.debug(`TV artwork from the page: ${fromPage}`);
+      this.render();
+    }
   }
 
   /* ---- Music.app ---------------------------------------------------- */
@@ -258,7 +267,7 @@ export class YanPresence {
         this.render();
         return;
       }
-      log.info(`Music.app is ${state}; clearing presence`);
+      log.info(`${this.sources.idleMessage(state)}; clearing presence`);
       this.queue(null);
     }, this.config.clearDelayMs);
     this.clearTimer.unref?.();
@@ -316,10 +325,23 @@ export class YanPresence {
       if (!stillCurrent()) return;
     }
 
-    // Local library file with no catalog entry: host its embedded artwork so
-    // there is still an album cover.
-    if (!this.artworkUrl && track.hasArtwork && !isCatalogTrack(track) && this.artwork.canHost) {
-      const dumped = await dumpCurrentArtwork();
+    // Nothing in the catalog matched, but the page it is playing on published
+    // a cover of its own -- an mzstatic URL Discord can fetch directly, so it
+    // needs no hosting of ours.
+    if (!this.artworkUrl) {
+      const fromPage = webArtwork(track, this.config.artworkSize);
+      if (fromPage) {
+        this.artworkUrl = fromPage;
+        log.debug(`Artwork from the page: ${fromPage}`);
+        this.render();
+        return;
+      }
+    }
+
+    // Artwork that only exists locally -- a library file's embedded cover, or
+    // the copy a browser wrote out for MPRIS -- has to be hosted to be shown.
+    if (!this.artworkUrl && track.hasArtwork && this.artwork.canHost) {
+      const dumped = await this.sources.localArtworkFor(track);
       if (!dumped) return;
       try {
         if (!stillCurrent()) return;
@@ -391,7 +413,7 @@ export class YanPresence {
     this.cancelHide();
 
     const activity = buildActivity({
-      track: this.currentTrack,
+      track: this.trackWithDuration(),
       state: this.currentState,
       catalog: this.catalogResult,
       artworkUrl: this.artworkUrl,
@@ -400,6 +422,18 @@ export class YanPresence {
     });
 
     this.queue(activity);
+  }
+
+  /**
+   * The web players report a playhead but not always a track length -- Firefox
+   * publishes no `mpris:length` at all -- and without a length there is no
+   * progress bar. The catalog knows how long the song is, so borrow it.
+   */
+  trackWithDuration() {
+    const track = this.currentTrack;
+    const known = this.catalogResult?.durationSec;
+    if (track.duration > 0 || !known) return track;
+    return { ...track, duration: known };
   }
 
   /**
@@ -536,4 +570,21 @@ export class YanPresence {
       this.lastSentJson = null;
     }
   }
+}
+
+/**
+ * The cover the page itself published, when it is a URL Discord can fetch.
+ * Browsers hand MPRIS a `file://` copy instead, which is handled separately by
+ * the hosting path.
+ *
+ * Apple's CDN URLs carry their dimensions in the filename, and what a page puts
+ * in its Media Session metadata is sized for a media notification -- 512px at
+ * best. Asking the same URL for the full size costs nothing and is the whole
+ * difference between a crisp card and a soft one.
+ */
+function webArtwork(media, size = 1024) {
+  const url = String(media?.artUrl ?? '');
+  if (!/^https:\/\//i.test(url)) return null;
+  const full = url.replace(/\/\d+x\d+((?:bb|bf|sr|cc)?\.(?:jpg|png|webp))$/i, `/${size}x${size}$1`);
+  return full.length <= 313 ? full : null;
 }

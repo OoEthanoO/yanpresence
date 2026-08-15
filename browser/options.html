@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>yanpresence bridge</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 2rem; max-width: 30rem; }
+  label { display: block; margin: 1rem 0 0.25rem; font-weight: 600; }
+  input { width: 100%; padding: 0.4rem; font: inherit; }
+  button { margin-top: 1.25rem; padding: 0.45rem 1rem; font: inherit; }
+  #status { margin-top: 1rem; }
+  .ok { color: #167a3c; }
+  .bad { color: #b3261e; }
+  p.hint { color: #666; }
+</style>
+
+<h1>yanpresence bridge</h1>
+<p class="hint">
+  Where yanpresence is listening. The defaults match a stock config; change
+  them only if you changed <code>browser.bridge</code> there.
+</p>
+
+<label for="host">Host</label>
+<input id="host" value="127.0.0.1">
+
+<label for="port">Port</label>
+<input id="port" type="number" value="8763">
+
+<label for="token">Token (optional)</label>
+<input id="token" placeholder="only if browser.bridge.token is set">
+
+<button id="save">Save</button>
+<button id="test">Test connection</button>
+
+<p id="status"></p>
+<script src="options.js"></script>

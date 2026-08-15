@@ -1,11 +1,12 @@
 # yanpresence
 
-Apple Music → Discord Rich Presence, for macOS.
+Apple Music → Discord Rich Presence, for macOS and Linux.
 
-Watches the **Music** app over Apple Events and mirrors what you're playing into
-Discord, laid out like Discord's own Spotify integration — with the song name on
-your status line instead of the artist, full-size album art, and the song,
-artist and album all clickable through to Apple Music.
+Watches the **Music** app over Apple Events on macOS, and the **web players** at
+`music.apple.com` and `tv.apple.com` on Linux, and mirrors what you're playing
+into Discord — laid out like Discord's own Spotify integration, with the song
+name on your status line instead of the artist, full-size album art, and the
+song, artist and album all clickable through to Apple Music.
 
 In the member list and under your name on your profile — the one-line status
 everyone sees at a glance:
@@ -29,8 +30,13 @@ And expanded, when someone clicks into your profile:
 
 ## What it does
 
-- **macOS + Music.app only.** Playback state comes from Apple Events sent to
-  `Music.app`; nothing else triggers it.
+- **Two ways in, one pipeline.** On macOS, playback state comes from Apple
+  Events sent to `Music.app` and `TV.app`. On Linux, it comes from the Apple
+  Music web player in your browser — over a companion extension, over MPRIS on
+  the session bus, or both. Everything past that point (catalog lookups, links,
+  artwork, the card itself) is identical, because the sources hand back
+  identical snapshots. Apple TV is macOS-only; see
+  [Linux and the web player](#linux-and-the-web-player).
 - **The song name on the status line.** Discord's `status_display_type` picks
   which field lands on the one-line status under your name. Spotify sets it to
   `STATE`, which is why its status reads as the *artist*; this sets `DETAILS`,
@@ -57,12 +63,19 @@ And expanded, when someone clicks into your profile:
 
 ## Requirements
 
-- macOS with the Music app
+- **macOS** with the Music app (and TV.app for Apple TV), or **Linux** with a
+  browser for Apple Music (tested on Ubuntu 26.04, Chrome 151, Firefox 149)
 - Node.js 18+ (developed on 26)
 - The Discord **desktop** app running (the web client has no local IPC socket)
-- `ffmpeg` — only for animated artwork (`brew install ffmpeg`)
+- `ffmpeg` — only for animated artwork (`brew install ffmpeg` /
+  `sudo apt install ffmpeg`)
 - `webp` — only if you switch `animatedArtwork.format` to `"webp"`
-  (`brew install webp`); the default AVIF path needs just ffmpeg
+  (`brew install webp` / `sudo apt install webp`); the default AVIF path needs
+  just ffmpeg
+
+On Linux, `busctl` (part of systemd, already installed) is used for the MPRIS
+source, and the companion extension in [`browser/`](browser/) is needed if you
+play in Chrome — see below for why.
 
 ## Setup
 
@@ -93,8 +106,13 @@ cd ~/yanpresence
 node bin/yanpresence.js --init
 ```
 
-That writes `~/Library/Application Support/yanpresence/config.json`. Open it and
-paste your Application ID into `clientId`.
+That writes `~/Library/Application Support/yanpresence/config.json` on macOS,
+or `~/.config/yanpresence/config.json` on Linux. Open it and paste your
+Application ID into `clientId`.
+
+On Linux, also install the browser extension if you use Chrome:
+`chrome://extensions` → **Developer mode** → **Load unpacked** → the
+[`browser/`](browser/) directory. Firefox needs nothing.
 
 ### 3. Check the setup
 
@@ -102,13 +120,18 @@ paste your Application ID into `clientId`.
 node bin/yanpresence.js --doctor
 ```
 
-This verifies the Music.app connection, the Discord IPC socket, the Apple Music
+This verifies the playback source — Music.app on macOS, the extension bridge and
+every MPRIS player on Linux — plus the Discord IPC socket, the Apple Music
 catalog lookup, and the animated-artwork toolchain, and tells you exactly what's
 missing.
 
-The first run triggers macOS's automation prompt — **allow your terminal to
-control Music**. If you miss it, it's under *System Settings → Privacy &
+On macOS, the first run triggers the automation prompt — **allow your terminal
+to control Music**. If you miss it, it's under *System Settings → Privacy &
 Security → Automation*.
+
+On Linux, play something in a browser before running `--doctor`: it reports what
+each player looks like from the outside, which is how you find out whether your
+browser identifies itself (see below).
 
 ### 4. Run it
 
@@ -119,10 +142,18 @@ node bin/yanpresence.js
 To have it start at login:
 
 ```bash
-npm run install-agent
+npm run install-agent      # macOS  — launchd
+npm run install-service    # Linux  — systemd user unit
 ```
 
-Logs go to `~/Library/Logs/yanpresence/`. Remove it with `npm run uninstall-agent`.
+Logs go to `~/Library/Logs/yanpresence/` on macOS, and to the journal on Linux
+(`journalctl --user -u yanpresence -f`). Remove either with
+`npm run uninstall-agent` / `npm run uninstall-service`.
+
+On Linux, running it as the user service is also the *reliable* way: a
+snap-packaged browser only answers MPRIS queries from unconfined callers, and a
+systemd user unit is unconfined. Launching yanpresence from inside another
+sandboxed application's terminal is the usual way to see `Access denied` there.
 
 ## Animated artwork
 
@@ -288,6 +319,62 @@ the settings up on webhook hosting, `onOversize` decides what happens:
 Setting `"maxBytes": null` disables the check entirely, which is the right thing
 with `command` hosting.
 
+### Hardware encoding, and why it is off
+
+The AV1 encode can be handed to a GPU, and on this machine it was — until the
+output was checked against the only reader that matters.
+
+Measured on Ubuntu 26.04 with a Radeon 780M (RDNA3) and an RTX 4070, ffmpeg
+8.0.1, on a 20.6s 2160×2160 master encoded to 1024px:
+
+| | time | size | renders in Discord |
+|---|---|---|---|
+| `libsvtav1` (CPU) | 2.6s | 10.8 MB | **yes** |
+| `av1_vaapi` (780M) | 1.5s | 10.2 MB | **no** — grey "?" |
+
+Chromium refuses to decode the VAAPI encoder's AVIF, and the Discord desktop
+client is Electron. Every variant fails the same way — CQP, VBR, a single tile,
+an explicit level, and even a single still frame — so it is not the animation,
+the rate control or the container. ffmpeg and ffprobe read the file back
+perfectly, which is exactly what makes it dangerous: the encode *looks* like it
+worked.
+
+Hardware **decode** does not help either. Software decode of the same master
+took 2.9s, against 4.9s on NVDEC and 3.9s on VAAPI: initialising a vendor's
+stack costs more than decoding twenty seconds of H.264 saves.
+
+So the encode stays on the CPU. It runs once per album and the result is cached
+forever, which is the other half of the argument — a second saved on a job you
+run once is not worth a card nobody can see.
+
+```jsonc
+"animatedArtwork": {
+  "hardware": {
+    "mode": "off",         // "off" (CPU) | "auto" (also CPU) | "vaapi" (force the GPU)
+    "device": "auto",      // "auto" | "amd" | "intel" | "nvidia" | "/dev/dri/renderD129"
+    "decode": false,       // hardware decode; independent of mode
+    "globalQuality": null  // override the CRF -> VAAPI quality conversion
+  }
+}
+```
+
+`"vaapi"` is kept for different hardware, a newer driver, or a consumer that is
+not Chromium. It warns when used, verifies the result, and falls back to the CPU
+encoder for the rest of the run if the encode fails outright. If you switch it
+and the art goes grey, switch back and run `--clear-cache` so the broken encode
+is replaced.
+
+Two details worth keeping if you do use it. The device is chosen **by vendor,
+not by number** — `/dev/dri/renderD128` is the usual hardcoded VAAPI default and
+on this laptop it is the NVIDIA card, which has no VAAPI encoder at all. And the
+VAAPI device is passed as `-init_hw_device` + `-filter_hw_device` rather than
+`-vaapi_device`, because any `-hwaccel` on the input side otherwise becomes the
+default filter device and `hwupload` hands NVIDIA frames to the AMD encoder,
+which fails with `EINVAL` and writes nothing.
+
+NVENC is never used for AVIF. Ada does encode AV1, but AV1-in-HEIF out of NVENC
+is not a combination anyone supports.
+
 ### Verifying what actually got hosted
 
 ```bash
@@ -331,15 +418,24 @@ single-frame still cover, stream 1 is the animation. Probing `v:0` reports
 Config is read from the first of these that exists:
 
 1. `$YANPRESENCE_CONFIG`
-2. `~/Library/Application Support/yanpresence/config.json`
-3. `~/.config/yanpresence/config.json`
+2. `~/Library/Application Support/yanpresence/config.json` (macOS)
+3. `~/.config/yanpresence/config.json` (Linux, and anywhere else)
 4. `./config.json`
+
+Cache and encoded artwork go beside it on macOS, and under
+`~/.cache/yanpresence` on Linux.
 
 | Key | Default | |
 |---|---|---|
 | `clientId` | — | **Required.** Discord Application ID. |
 | `activityName` | `"Apple Music"` | Keep in sync with the app's name in the portal. |
 | `storefront` | `"us"` | Apple Music storefront for lookups and links. |
+| `source` | `"auto"` | Where playback state comes from: `auto` (Music.app on macOS, the web players elsewhere), `apple-apps`, `browser`. |
+| `browser.bridge.enabled` | `true` | Loopback endpoint the companion extension posts to. Required for Chrome. |
+| `browser.bridge.port` | `8763` | Port for that endpoint, on `127.0.0.1`. |
+| `browser.bridge.token` | `""` | Optional shared secret; paste the same value into the extension's options. |
+| `browser.mpris.enabled` | `true` | Read players off the session bus. Identifies Apple Music by itself in Firefox. |
+| `browser.mpris.players` | `{}` | Map an MPRIS bus name fragment to `music` / `tv` / `ignore`, for browsers that publish no page URL. |
 | `statusDisplay` | `"details"` | Which field lands on your status line: `details` (song), `state` (artist, Spotify's choice), `name`. |
 | `artworkSize` | `1024` | Square px requested from Apple's CDN. |
 | `showSmallImage` | `true` | Small corner badge. |
@@ -347,7 +443,7 @@ Config is read from the first of these that exists:
 | `placeholderImageKey` | `"blank"` | Portal asset shown when there's no album art, so the slot never renders as Discord's "?". Upload `assets/blank.png`. `null` leaves the slot empty. |
 | `linkButtons` | `false` | Also attach classic Rich Presence buttons — a fallback for older clients that don't render `details_url`/`state_url`/`large_url`. |
 | `showWhenPaused` | `false` | Keep the presence up while paused. Off by default — a paused track isn't something you're listening to. When on, the progress bar is dropped. |
-| `pollIntervalMs` | `1000` | How often Music.app is sampled. |
+| `pollIntervalMs` | `1000` | How often the source is sampled. |
 | `minUpdateIntervalMs` | `2500` | Floor between `SET_ACTIVITY` frames; Discord rate-limits these. |
 | `seekToleranceSec` | `2` | Drift before a seek is assumed and the timeline is rebased. |
 | `clearDelayMs` | `5000` | How long playback must be non-playing — paused, stopped or quit — before the presence clears. Music.app blips `paused` between tracks, so clearing instantly would flicker the status between every song. Lower it for a snappier hide. |
@@ -362,6 +458,10 @@ Config is read from the first of these that exists:
 | `animatedArtwork.quality` | `75` | WebP quality, when `format` is `webp`. |
 | `animatedArtwork.maxBytes` | `9437184` | Encode ceiling. `null` disables the check. |
 | `animatedArtwork.onOversize` | `"degrade"` | `degrade` refits to fit; `skip` falls back to static art rather than compromise. |
+| `animatedArtwork.hardware.mode` | `"off"` | GPU encoding: `off` and `auto` both use the CPU; `vaapi` forces the GPU. See [Hardware encoding](#hardware-encoding-and-why-it-is-off). |
+| `animatedArtwork.hardware.device` | `"auto"` | `auto` \| `amd` \| `intel` \| `nvidia` \| a `/dev/dri/renderD*` path. Chosen by vendor, not by number. |
+| `animatedArtwork.hardware.decode` | `false` | Hardware decode, independent of `mode`. Measured slower than software. |
+| `animatedArtwork.hardware.globalQuality` | `null` | Override the CRF → VAAPI `global_quality` conversion. |
 | `uploadLocalArtwork` | `true` | For local library files with no catalog entry, upload their embedded cover through the same host. |
 | `logLevel` | `"info"` | `error` \| `warn` \| `info` \| `debug` |
 
@@ -458,6 +558,90 @@ iTunes Store. A purchased or rented film returns no match and keeps the
 `placeholderImageKey` fallback. Matching requires a title hit, so a near-miss
 yields no artwork rather than the wrong artwork.
 
+## Linux and the web player
+
+There is no Music.app to script on Linux, so playback state comes from the
+Apple Music web player at `music.apple.com`, in whatever browser you use.
+Everything downstream is unchanged: the same catalog lookups, the same links,
+the same 1024×1024 (and animated) artwork, the same card.
+
+**Audio only.** Apple TV is a macOS source, driven through TV.app, which reports
+the show, the season and the episode as fields; the web player offers an episode
+title and little else, so `tv.apple.com` is not read at all and a tab playing it
+is ignored.
+
+The only hard problem is knowing *which page* is playing.
+
+### Why there are two sources
+
+Every browser on Linux publishes the page's Media Session metadata over MPRIS on
+the session bus — title, artist, album, artwork, playhead. What it does not
+always publish is the URL:
+
+| | Media Session metadata | playhead | duration | page URL |
+|---|---|---|---|---|
+| Firefox 149 | yes | yes | no | **yes** (`xesam:url`) |
+| Chrome 151 | **none from Apple Music** — the tab title arrives instead | yes | yes | **no** |
+
+Chrome is the harder case in both columns. It publishes no page URL, so nothing
+outside the page can tell Apple Music from any other tab — and for Apple Music
+specifically the site sets no Media Session metadata in Chrome at all, so what
+does arrive is the tab title (`Top All - Playlist - Apple Music`) with an empty
+artist and album. Chrome's own media controls show the same thing. No amount of
+D-Bus reading fixes that.
+
+So:
+
+- **Firefox** works with nothing installed. It publishes the URL, so
+  `music.apple.com` and `tv.apple.com` are picked out automatically and
+  everything else is ignored.
+- **Chrome** (and Chromium, Edge, Brave) needs the companion extension in
+  [`browser/`](browser/): `chrome://extensions` → **Developer mode** → **Load
+  unpacked** → the `browser/` directory. It reads **MusicKit** — the player
+  object the web app itself runs on — so it gets the track, the artist, the
+  album, Apple's own artwork URL at full size and an exact playhead, none of
+  which Chrome forwards on its own.
+
+Both can run at once, and normally should. The extension wins whenever it has
+something to say; MPRIS covers whatever it does not.
+
+Firefox publishes no track length, so a Firefox-sourced track gets its duration
+from the catalog lookup instead — which is what puts the progress bar under it.
+
+### The `players` escape hatch
+
+`browser.mpris.players` maps a fragment of an MPRIS bus name (or of the player's
+`Identity`) onto what that player is assumed to be showing:
+
+```jsonc
+"browser": {
+  "mpris": {
+    "players": { "chromium.instance": "music" }   // or "tv", or "ignore"
+  }
+}
+```
+
+**This is not a way to skip the extension in Chrome.** Apple Music gives Chrome
+no metadata to forward, so mapping it would put `Top All - Playlist - Apple
+Music` on your status line with no artist. It is for a browser that does publish
+usable metadata and that you keep exclusively for Apple Music — with no URL to
+check, *every* tab in it counts, including the YouTube one. `"ignore"` is the
+other direction: never report this player, whatever it says.
+
+### Snap-packaged browsers
+
+Snap confines its own MPRIS interface and only answers callers that are
+unconfined. Running yanpresence from a normal terminal or as the systemd user
+service is unconfined and works; running it from inside another sandboxed
+application's terminal gets `Access denied`, which `--doctor` will tell you
+about by name.
+
+### Discord
+
+The IPC socket is found at `$XDG_RUNTIME_DIR/discord-ipc-N`, and also inside the
+Flatpak (`app/com.discordapp.Discord/`) and snap (`snap.discord/`) runtime
+directories, so all three packagings work without configuration.
+
 ## Tests
 
 ```bash
@@ -466,17 +650,28 @@ npm test
 
 Node's built-in runner, no dependencies. Covers the activity payload's
 constraints (the `status_display_type` mapping, length caps, the never-empty
-image slot), artwork cache invalidation, and the watcher's watchdog. Nothing
-touches Music.app, Discord or the network, so it runs anywhere — though the
-watchdog cases wait on a real 5s interval, which puts the suite at ~20s.
+image slot), artwork cache invalidation, the watcher's watchdog, and the Linux
+path end to end: MPRIS parsing and classification against real captured
+`busctl` replies, the bridge's HTTP contract, the extension's own scripts run
+against stubbed browser APIs, and GPU device selection including the
+fall-back-to-CPU behaviour. Nothing touches Music.app, Discord, a GPU or the
+network, so it runs anywhere — though the watchdog cases wait on a real 5s
+interval, which puts the suite at ~20s.
 
 ## How it works
 
 ```
+macOS:
 Music.app ──Apple Events──> scripts/music-watch.js  (resident osascript, JXA)
                                      │ JSON lines
                                      ▼
                               src/music.js          normalize, watchdog, respawn
+                                     │
+Linux:                               │
+music.apple.com ──extension──> src/bridge.js   ────┤   loopback HTTP, reads MusicKit
+   in a browser  ──MPRIS─────> src/mpris.js    ────┤   busctl, identifies by page URL
+                                     │             │
+                              src/sources.js  ─────┘   one snapshot shape either way
                                      ▼
                               src/index.js          track/seek/pause state machine
                                 ├──> src/catalog.js links + artwork URL + motion artwork
@@ -506,6 +701,14 @@ A few decisions worth calling out:
   links rather than wrong ones.
 - **Discord IPC is spoken directly** — no `discord-rpc` dependency. The whole
   project has zero npm dependencies.
+- **The browser sources hand back the same snapshots the Apple apps do**, which
+  is why nothing below `src/sources.js` knows or cares which platform it is on.
+  The one thing that genuinely differs is identification: an Apple Event can
+  only have come from Music.app, while a browser tab has to prove which site it
+  is — see [Linux and the web player](#linux-and-the-web-player).
+- **GPU work is verified, not assumed** — and then measured, which is how the
+  hardware AV1 encoder turned out to produce files Discord cannot render at all.
+  It is off by default for that reason, not for a theoretical one.
 
 ## Troubleshooting
 

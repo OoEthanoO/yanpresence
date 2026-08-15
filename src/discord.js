@@ -34,7 +34,7 @@ export class DiscordRPC extends EventEmitter {
   }
 
   static candidateSockets() {
-    const bases = [
+    const roots = [
       process.env.XDG_RUNTIME_DIR,
       process.env.TMPDIR,
       process.env.TMP,
@@ -42,6 +42,22 @@ export class DiscordRPC extends EventEmitter {
       '/tmp',
       os.tmpdir(),
     ].filter(Boolean);
+
+    // Sandboxed builds keep their socket inside the sandbox's own runtime
+    // directory rather than at the top of it: Flatpak under app/<app-id>,
+    // snap under snap.<name>. A stock .deb Discord uses the plain path.
+    const SANDBOXES = [
+      'app/com.discordapp.Discord',
+      'app/com.discordapp.DiscordCanary',
+      'app/com.discordapp.DiscordPTB',
+      'snap.discord',
+      'snap.discord-canary',
+    ];
+
+    const bases = [...roots];
+    for (const root of roots) {
+      for (const sandbox of SANDBOXES) bases.push(path.join(root, sandbox));
+    }
 
     const paths = [];
     for (const base of [...new Set(bases)]) {

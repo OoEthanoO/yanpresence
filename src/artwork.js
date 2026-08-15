@@ -6,6 +6,13 @@ import os from 'node:os';
 import path from 'node:path';
 
 import log from './log.js';
+import {
+  detectRenderNodes,
+  hasNvidia,
+  planAvif,
+  planDecodeOnly,
+  probeFfmpegCapabilities,
+} from './gpu.js';
 
 /**
  * Apple ships motion ("animated") album artwork as an HLS video stream, which
@@ -44,6 +51,34 @@ export class ArtworkHost {
     this.cache = this.loadCache();
     this.inflight = new Map();
     this.toolChecks = new Map();
+
+    // Hardware encoding: probed once, on demand, and abandoned for the life of
+    // the process the first time it lets us down.
+    this.hwOpts = this.opts.hardware ?? {};
+    this.hwProbe = null;
+    this.hwGaveUp = false;
+  }
+
+  /**
+   * What this machine can encode with. Two ffmpeg spawns, once, and only when
+   * there is a GPU worth asking about.
+   */
+  async hardware() {
+    if (this.hwProbe) return this.hwProbe;
+    this.hwProbe = (async () => {
+      const nodes = detectRenderNodes({ drmClass: this.hwOpts.drmClass });
+      const nvidia = hasNvidia();
+      if (!nodes.length && !nvidia) {
+        return { nodes, nvidia, capabilities: { available: false, encoders: new Set(), hwaccels: new Set() } };
+      }
+      const capabilities = await probeFfmpegCapabilities(this.opts.ffmpegPath);
+      log.debug(
+        `GPU: ${nodes.map((n) => `${n.node}=${n.vendor}`).join(' ') || 'no render nodes'}` +
+          `${nvidia ? ' + nvidia driver' : ''}`
+      );
+      return { nodes, nvidia, capabilities };
+    })();
+    return this.hwProbe;
   }
 
   get canHost() {
@@ -521,19 +556,79 @@ export class ArtworkHost {
     );
   }
 
-  /** Single ffmpeg pass. Smallest output by a wide margin. */
-  encodeAvif({ input, out, size, crf }) {
+  /**
+   * Single ffmpeg pass. Smallest output by a wide margin.
+   *
+   * Tried on the GPU first where one is available -- VAAPI AV1 on an AMD or
+   * Intel device, with the decode side on NVDEC if there is a discrete card.
+   * The result is verified rather than assumed: an encoder that writes a file
+   * ffprobe cannot read is a failure that exits 0, and the CPU encoder is the
+   * answer to every way that can go wrong.
+   */
+  async encodeAvif({ input, out, size, crf }) {
+    const gop = String(this.opts.fps * 2);
+
+    if (!this.hwGaveUp) {
+      const { nodes, nvidia, capabilities } = await this.hardware();
+      const plan = capabilities.available
+        ? planAvif({ capabilities, nodes, nvidia, config: this.hwOpts, crf })
+        : null;
+
+      if (plan) {
+        try {
+          await this.runFfmpeg([
+            ...plan.input,
+            '-i', input,
+            '-an',
+            '-vf', `${this.scaleFilter(size)},${plan.filter}`,
+            ...plan.output,
+            // Keyframe roughly every 2s: the loop still seeks cheaply.
+            '-g', gop,
+            out,
+          ]);
+
+          const seconds = await this.probeDuration(out);
+          const { size: bytes } = await fsp.stat(out).catch(() => ({ size: 0 }));
+          if (seconds > 0 && bytes > 0) {
+            log.debug(`Encoded on the GPU: ${plan.label}`);
+            return;
+          }
+          throw new Error('produced a file ffprobe could not read');
+        } catch (err) {
+          this.hwGaveUp = true;
+          log.warn(
+            `Hardware AVIF encode (${plan.label}) failed: ${err.message}. ` +
+              'Falling back to the CPU encoder for the rest of this run — set ' +
+              'animatedArtwork.hardware.mode to "off" to stop trying.'
+          );
+          await fsp.rm(out, { force: true }).catch(() => {});
+        }
+      }
+    }
+
     return this.runFfmpeg([
+      ...(await this.decodeArgs()),
       '-i', input,
       '-an',
       '-vf', this.scaleFilter(size),
       '-c:v', 'libsvtav1',
       '-crf', String(crf),
-      // Keyframe roughly every 2s: the loop still seeks cheaply.
-      '-g', String(this.opts.fps * 2),
+      '-g', gop,
       '-pix_fmt', 'yuv420p',
       out,
     ]);
+  }
+
+  /**
+   * Hardware decode arguments for the paths that encode on the CPU. `-hwaccel`
+   * is a hint -- ffmpeg falls back to software decoding on its own when the
+   * codec or device cannot serve it -- so this is safe to pass blind.
+   */
+  async decodeArgs() {
+    if (this.hwGaveUp) return [];
+    const { nodes, nvidia, capabilities } = await this.hardware();
+    if (!capabilities.available) return [];
+    return planDecodeOnly({ capabilities, nodes, nvidia, config: this.hwOpts })?.input ?? [];
   }
 
   /**
@@ -547,6 +642,7 @@ export class ArtworkHost {
     await fsp.mkdir(framedir, { recursive: true });
 
     await this.runFfmpeg([
+      ...(await this.decodeArgs()),
       '-i', input,
       '-an',
       '-vf', this.scaleFilter(size),
@@ -573,13 +669,14 @@ export class ArtworkHost {
   }
 
   /** Legacy fallback. Kept because every client renders GIF. */
-  encodeGif({ input, out, size }) {
+  async encodeGif({ input, out, size }) {
     const filter =
       `${this.scaleFilter(size)},split[a][b];` +
       `[a]palettegen=max_colors=160:stats_mode=diff[p];` +
       `[b][p]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle`;
 
     return this.runFfmpeg([
+      ...(await this.decodeArgs()),
       '-i', input,
       '-an',
       '-vf', filter,
@@ -825,8 +922,8 @@ export class ArtworkHost {
       if (!(await this.hasTool(bin))) {
         throw new Error(
           label === 'img2webp'
-            ? `img2webp not found at "${bin}" — install it with \`brew install webp\`, or set animatedArtwork.format to "avif"`
-            : `ffmpeg not found at "${bin}" — install it with \`brew install ffmpeg\``
+            ? `img2webp not found at "${bin}" — ${installHint('webp')}, or set animatedArtwork.format to "avif"`
+            : `ffmpeg not found at "${bin}" — ${installHint('ffmpeg')}`
         );
       }
     }
@@ -881,4 +978,14 @@ function shellQuote(value) {
 function sanitize(key) {
   const slug = key.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 48) || 'artwork';
   return `${slug}-${crypto.createHash('sha1').update(key).digest('hex').slice(0, 8)}`;
+}
+
+/**
+ * How to get a missing tool, in the words of the platform being run on. The
+ * package name differs too: img2webp is in `webp` on both, ffmpeg in `ffmpeg`.
+ */
+export function installHint(tool) {
+  return process.platform === 'darwin'
+    ? `install it with \`brew install ${tool}\``
+    : `install it with \`sudo apt install ${tool}\` (or your distribution's equivalent)`;
 }
