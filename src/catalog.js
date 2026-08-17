@@ -567,7 +567,7 @@ function pickBest(scored) {
   return best && best.score >= 0.55 ? best : null;
 }
 
-function scoreCommon({ name, artist, album, durationSec }, track) {
+export function scoreCommon({ name, artist, album, durationSec }, track) {
   const nameScore = similarity(name, track.name);
   // A different song from the right album still scores ~0.55 on artist and
   // album alone, which is enough to sail past the overall threshold and
@@ -582,7 +582,19 @@ function scoreCommon({ name, artist, album, durationSec }, track) {
     durationScore = delta <= 2 ? 1 : delta <= 5 ? 0.8 : delta <= 15 ? 0.4 : 0;
   }
 
-  return (nameScore * 4 + artistScore * 3 + albumScore * 2 + durationScore * 1) / 10;
+  let score = (nameScore * 4 + artistScore * 3 + albumScore * 2 + durationScore * 1) / 10;
+
+  // "Greatest Hits" and "Greatest Hits (Deluxe Edition)" both hit 1.0 on the
+  // album once the noise strip runs, so different *editions* tie and search
+  // order picks one — showing the deluxe cover and link under the plain
+  // edition's name, or vice versa. An album named exactly what the player
+  // reports gets a bump past TIE_EPSILON, so the playing edition wins the tie
+  // outright. Clean/explicit variants share one album name, so they either
+  // both get this or neither does, and the motion tie-break still separates
+  // them.
+  if (track.album && normalizeLoose(album) === normalizeLoose(track.album)) score += 0.03;
+
+  return score;
 }
 
 function scoreAmpSong(song, track) {
