@@ -251,6 +251,36 @@ test('a film, or a show with no season id, asks for no runtime', async () => {
   );
 });
 
+test('a film uses its titled poster, since Apple publishes no square for movies', async () => {
+  // Films have no square anywhere in the catalog -- unlike a season, whose
+  // previewFrame is a true 3000x3000. The 2:3 poster is chosen over the 16:9
+  // shelf image because it wastes less of a square slot (33% vs 44%) and,
+  // unlike a production still, it carries the title.
+  const cat = new TvCatalog({ storefront: 'ca', cacheDir: os.tmpdir(), artworkSize: 1024 });
+  cat.getJson = async () => ({
+    data: {
+      images: {
+        coverArt16X9: { url: 'https://x/thumb/WIDE/{w}x{h}.{f}', width: 3840, height: 2160 },
+        coverArt2X3: { url: 'https://x/thumb/POSTER/{w}x{h}.{f}', width: 2000, height: 3000 },
+      },
+    },
+  });
+  assert.match(await cat.movieCover('umc.cmc.film', 'token'), /thumb\/POSTER\//);
+});
+
+test('a square is still preferred for a film, should Apple ever publish one', async () => {
+  const cat = new TvCatalog({ storefront: 'ca', cacheDir: os.tmpdir(), artworkSize: 1024 });
+  cat.getJson = async () => ({
+    data: {
+      images: {
+        coverArt: { url: 'https://x/thumb/SQUARE/{w}x{h}.{f}', width: 3000, height: 3000 },
+        coverArt2X3: { url: 'https://x/thumb/POSTER/{w}x{h}.{f}', width: 2000, height: 3000 },
+      },
+    },
+  });
+  assert.match(await cat.movieCover('umc.cmc.film', 'token'), /thumb\/SQUARE\//);
+});
+
 test('resolved artwork replaces the placeholder', () => {
   const url = 'https://is1-ssl.mzstatic.com/image/thumb/abc/1024x1024bf.jpg';
   const a = buildWatchActivity({

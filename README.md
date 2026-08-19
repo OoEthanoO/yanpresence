@@ -545,14 +545,21 @@ the *show* (`showImages`). Grepping for "coverArt" finds the same image for
 every season and makes per-season art look nonexistent.
 
 A season the metadata route has nothing for falls back to the show's own
-square cover. The remaining non-square case (a film's shelf image) is fitted
-with the `bf` crop code, which mattes the full frame instead of cropping it —
-every other crop code either eats the title treatment (`sr`, `cc`, `ve`) or
-ignores the square entirely and returns 16:9 (`bb`, plain).
+square cover.
+
+**Films have no square anywhere in Apple's catalog** — checked across both the
+movie endpoint and its metadata route, where the only 1:1 assets are cast
+headshots and the Apple TV+ channel logo. They use the titled 2:3 poster
+(`coverArt2X3`, `v=100`) instead of the 16:9 shelf image the search returns:
+matted into a square it wastes 33% of the slot rather than 44%, and it carries
+the title, which a production still does not. Matting uses the `bf` crop code,
+which fits the whole frame — every other code either eats the title treatment
+(`sr`, `cc`, `ve`) or ignores the square entirely and returns 16:9 (`bb`,
+plain).
 
 Lookups are keyed on the **show** plus the season being watched: a binge costs
 one search, one season-list call, and one metadata call per season you reach,
-each cached for 30 days.
+each cached for 30 days. A film costs one search and one metadata call.
 
 **What does not resolve:** that search covers the Apple TV+ catalogue, not the
 iTunes Store. A purchased or rented film returns no match and keeps the

@@ -192,7 +192,12 @@ export class TvCatalog {
     return {
       ...entry,
       artworkUrl: tvArtworkAt(template, this.artworkSize),
-      artworkScope: season && entry.seasons?.[season] ? `season ${season}` : 'show',
+      artworkScope:
+        season && entry.seasons?.[season]
+          ? `season ${season}`
+          : entry.type === 'Movie'
+            ? 'film'
+            : 'show',
     };
   }
 
@@ -259,8 +264,40 @@ export class TvCatalog {
       // Seed the covers for the season being watched; lookup() fills in any
       // other season on demand later.
       await this.ensureSeasonCover(entry, item.isEpisode ? item.season : 0);
+    } else if (wantMovie && entry.id) {
+      const poster = await this.movieCover(entry.id, token).catch((err) => {
+        log.debug(`Movie artwork lookup failed: ${err.message}`);
+        return null;
+      });
+      if (poster) entry.artworkTemplate = poster;
     }
     return entry;
+  }
+
+  /**
+   * A film's poster, from the movie metadata route.
+   *
+   * Films have no square anywhere in Apple's catalog -- unlike a season, whose
+   * `previewFrame` is a true 3000x3000. What they do have, at `v=100`, is the
+   * titled 2:3 poster Apple moved to in iOS 26. It is preferred over the 16:9
+   * shelf image the search returns for two reasons: matted into a square it
+   * wastes 33% of the slot rather than 44%, and it carries the title, which a
+   * production still does not -- an untitled frame is unidentifiable at the
+   * size Discord renders.
+   */
+  async movieCover(movieId, token) {
+    const body = await this.getJson(
+      `${UTS_BASE}/movies/${encodeURIComponent(movieId)}/metadata?utsk=${encodeURIComponent(token)}` +
+        `&caller=web&sf=${this.sf}&v=100&pfm=web&locale=en-US&utscf=OjAAAAAAAAA~`
+    );
+    const images = body?.data?.images ?? {};
+    // Squares stay first in case Apple ever publishes one for a film.
+    return (
+      squareUrl(images.coverArt) ??
+      squareUrl(images.previewFrame) ??
+      pickUrl(images.coverArt2X3) ??
+      null
+    );
   }
 
   /**
