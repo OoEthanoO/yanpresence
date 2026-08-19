@@ -206,6 +206,51 @@ test('a season miss is remembered so it is not refetched every episode', async (
   assert.match(entry.artworkTemplate, /thumb\/SHOW\//, 'show fallback upgraded to the square');
 });
 
+test('episode runtime is recovered when TV.app reports none', async () => {
+  // Apple TV+ streams expose no duration through TV.app at all, and without a
+  // runtime there is no end timestamp, so Discord shows no progress whatsoever.
+  const cat = new TvCatalog({ storefront: 'ca', cacheDir: os.tmpdir(), artworkSize: 1024 });
+  let calls = 0;
+  cat.getJson = async () => {
+    calls += 1;
+    return {
+      data: {
+        episodes: [
+          { seasonNumber: 3, episodeNumber: 5, duration: 2940 },
+          { seasonNumber: 3, episodeNumber: 6, duration: 3780 },
+          // Neighbouring seasons ride along in the same response.
+          { seasonNumber: 2, episodeNumber: 1, duration: 1800 },
+        ],
+      },
+    };
+  };
+  cat.memo.set('ca|ted lasso', { id: 'umc.cmc.show', seasonIds: { 2: 'umc.cmc.s2', 3: 'umc.cmc.s3' } });
+
+  const item = { isEpisode: true, show: 'Ted Lasso', name: 'Sunflowers', season: 3, episode: 6 };
+  assert.equal(await cat.durationFor(item), 3780);
+
+  // Everything in the response is kept, so a second episode is free.
+  assert.equal(await cat.durationFor({ ...item, episode: 5, name: 'Signs' }), 2940);
+  assert.equal(calls, 1, 'one request covers the season');
+
+  // An episode Apple has no runtime for is remembered as a miss.
+  assert.equal(await cat.durationFor({ ...item, episode: 99 }), null);
+  assert.equal(calls, 2, 'one retry for the unknown episode, then cached');
+  assert.equal(await cat.durationFor({ ...item, episode: 99 }), null);
+  assert.equal(calls, 2);
+});
+
+test('a film, or a show with no season id, asks for no runtime', async () => {
+  const cat = new TvCatalog({ storefront: 'ca', cacheDir: os.tmpdir(), artworkSize: 1024 });
+  cat.getJson = async () => assert.fail('should not have made a request');
+  assert.equal(await cat.durationFor({ isEpisode: false, name: 'Ghosted' }), null);
+  cat.memo.set('ca|ted lasso', { id: 'umc.cmc.show', seasonIds: { 1: 'umc.cmc.s1' } });
+  assert.equal(
+    await cat.durationFor({ isEpisode: true, show: 'Ted Lasso', season: 7, episode: 1 }),
+    null
+  );
+});
+
 test('resolved artwork replaces the placeholder', () => {
   const url = 'https://is1-ssl.mzstatic.com/image/thumb/abc/1024x1024bf.jpg';
   const a = buildWatchActivity({

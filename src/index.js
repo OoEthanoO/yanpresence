@@ -45,6 +45,7 @@ export class YanPresence {
     this.tvSnapshot = null;
     this.musicSnapshot = null;
     this.tvArtworkUrl = null;
+    this.tvDuration = 0;
     this.source = null; // 'music' | 'tv' | null
 
     // Everything about the track Discord is currently being told about.
@@ -142,6 +143,7 @@ export class YanPresence {
       this.tvState = state;
       this.tvStartedAt = state === 'playing' ? receivedAt - item.position * 1000 : null;
       this.tvArtworkUrl = null;
+      this.tvDuration = 0;
       this.cancelHide();
       this.render();
       this.enrichTv(item).catch((err) => log.debug(`TV enrichment failed: ${err.message}`));
@@ -183,18 +185,31 @@ export class YanPresence {
 
     if (result?.artworkUrl) {
       this.tvArtworkUrl = result.artworkUrl;
-      log.debug(`TV artwork for ${result.title}: ${result.artworkUrl}`);
+      log.debug(`TV artwork (${result.artworkScope}) for ${result.title}: ${result.artworkUrl}`);
       this.render();
-      return;
+    } else {
+      // The web player publishes its own poster through the Media Session API,
+      // which covers what the catalog search cannot resolve.
+      const fromPage = webArtwork(item);
+      if (fromPage) {
+        this.tvArtworkUrl = fromPage;
+        log.debug(`TV artwork from the page: ${fromPage}`);
+        this.render();
+      }
     }
 
-    // The web player publishes its own poster through the Media Session API,
-    // which covers what the catalog search cannot resolve.
-    const fromPage = webArtwork(item);
-    if (fromPage) {
-      this.tvArtworkUrl = fromPage;
-      log.debug(`TV artwork from the page: ${fromPage}`);
-      this.render();
+    // Apple TV+ streams report no duration through TV.app, so without this
+    // there is no end timestamp and therefore no progress at all. Deliberately
+    // outside the artwork branches: the two are independent, and returning
+    // early once artwork resolved would leave every catalog-matched show
+    // without progress.
+    if (!item.duration) {
+      const seconds = await this.tvCatalog.durationFor(item);
+      if (seconds && this.tvKey === key) {
+        this.tvDuration = seconds;
+        log.debug(`TV runtime for ${item.name}: ${seconds}s (TV.app reported none)`);
+        this.render();
+      }
     }
   }
 
@@ -394,7 +409,9 @@ export class YanPresence {
 
     this.queue(
       buildWatchActivity({
-        item: this.tvItem,
+        // The runtime resolved from the catalog stands in when TV.app reports
+        // none, which is every Apple TV+ stream.
+        item: { ...this.tvItem, duration: this.tvItem.duration || this.tvDuration || 0 },
         state: this.tvState,
         artworkUrl: this.tvArtworkUrl ?? null,
         config: this.config,

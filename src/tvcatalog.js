@@ -348,6 +348,70 @@ export class TvCatalog {
   }
 
 
+  /**
+   * Episode runtimes for a season, keyed `"season|episode"`.
+   *
+   * TV.app reports no duration at all for Apple TV+ streams -- the property is
+   * absent, and reading it directly throws -- so without this there is nothing
+   * to build a progress bar from. Purchased items do carry it locally, which
+   * is why this is only consulted as a fallback.
+   */
+  async episodeDurations(showId, seasonId, token) {
+    const body = await this.getJson(
+      `${UTS_BASE}/shows/${encodeURIComponent(showId)}/episodes?utsk=${encodeURIComponent(token)}` +
+        `&caller=web&sf=${this.sf}&v=80&pfm=web&locale=en-US&utscf=OjAAAAAAAAA~` +
+        `&selectedSeasonId=${encodeURIComponent(seasonId)}`
+    );
+    const episodes = body?.data?.episodes ?? [];
+    const out = {};
+    for (const episode of episodes) {
+      const s = episode?.seasonNumber;
+      const e = episode?.episodeNumber;
+      const seconds = Number(episode?.duration);
+      // The response carries the neighbouring seasons too, so everything it
+      // hands back is kept -- a binge then costs one request per season.
+      if (Number.isInteger(s) && Number.isInteger(e) && seconds > 0) out[`${s}|${e}`] = seconds;
+    }
+    return out;
+  }
+
+  /**
+   * Runtime in seconds for the episode being watched, or null. Cached with the
+   * show entry, so one request covers the whole season.
+   */
+  async durationFor(item) {
+    if (!item?.isEpisode) return null;
+    const term = item.show || item.name;
+    if (!term) return null;
+
+    const key = `${this.storefront}|${term.toLowerCase()}`;
+    const entry = this.memo.get(key) ?? this.disk[key];
+    if (!entry || entry.miss || !entry.id) return null;
+
+    const seasonId = entry.seasonIds?.[item.season];
+    if (!seasonId) return null;
+
+    entry.durations ??= {};
+    const slot = `${item.season}|${item.episode}`;
+
+    if (entry.durations[slot] === undefined) {
+      const token = await this.tokens.get();
+      if (!token) return null;
+      const found = await this.episodeDurations(entry.id, seasonId, token).catch((err) => {
+        log.debug(`Episode duration lookup failed: ${err.message}`);
+        return null;
+      });
+      if (found) Object.assign(entry.durations, found);
+      // null remembers a miss, so a runtime Apple does not publish is not
+      // re-requested on every tick.
+      entry.durations[slot] ??= null;
+      this.disk[key] = entry;
+      this.saveDisk();
+    }
+
+    return entry.durations[slot] ?? null;
+  }
+
   async getJson(url) {
     const res = await fetch(url, {
       headers: { 'User-Agent': BROWSER_UA, Origin: TV_WEB, Referer: `${TV_WEB}/` },
