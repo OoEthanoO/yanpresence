@@ -9,6 +9,7 @@ import { CACHE_DIR, PROJECT_ROOT, SUPPORT_DIR, configPaths, loadConfig, validate
 import { DiscordRPC } from '../src/discord.js';
 import { createSources, resolveSourceKind } from '../src/sources.js';
 import { episodeCode } from '../src/tv.js';
+import { TvCatalog } from '../src/tvcatalog.js';
 import { YanPresence } from '../src/index.js';
 import log, { setLevel } from '../src/log.js';
 
@@ -301,7 +302,71 @@ async function doctorAppleApps(config, rows) {
     ok('Apple TV', `running, player state "${tv.state}"`);
   }
 
+  await doctorTvArtwork(config, tv, rows);
   doctorTvHeader(config, rows);
+}
+
+/**
+ * Exercises the artwork pipeline end to end: token, search, and the season or
+ * film cover.
+ *
+ * Worth its own row because this is the one part of yanpresence riding an
+ * undocumented Apple endpoint. If tv.apple.com changes shape, nothing breaks
+ * loudly -- shows keep playing and the card keeps rendering, just with the
+ * transparent placeholder where the art should be. That is invisible unless
+ * something checks, so this checks.
+ */
+async function doctorTvArtwork(config, tv, rows) {
+  const catalog = new TvCatalog({
+    storefront: config.storefront,
+    cacheDir: CACHE_DIR,
+    artworkSize: config.artworkSize,
+  });
+
+  // Whatever is on screen is the most honest probe. With TV.app closed a stable
+  // Apple Original stands in, so the pipeline is still verified.
+  const probe = tv?.active
+    ? tv.item
+    : { isEpisode: true, show: 'Severance', name: 'doctor probe', season: 1, episode: 1 };
+  const label = probe.show || probe.name;
+
+  let result;
+  try {
+    result = await catalog.lookup(probe);
+  } catch (err) {
+    rows.push(['bad', 'Apple TV artwork', `lookup failed: ${err.message}`]);
+    return;
+  }
+
+  if (!result?.artworkUrl) {
+    rows.push([
+      'warn',
+      'Apple TV artwork',
+      `nothing resolved for "${label}" — the card falls back to placeholderImageKey.\n` +
+        "      Apple's tv.apple.com endpoint is undocumented; it may have changed shape.",
+    ]);
+    return;
+  }
+
+  const res = await fetch(result.artworkUrl, { method: 'HEAD' }).catch(() => null);
+  if (!res?.ok) {
+    rows.push([
+      'warn',
+      'Apple TV artwork',
+      `resolved a URL for "${label}" but it answered ${res?.status ?? 'not at all'}`,
+    ]);
+    return;
+  }
+
+  // The matched catalog title is shown, not just the one searched for: a
+  // generic show name ("Lucky") can match a different title at full confidence,
+  // and that is otherwise indistinguishable from a correct hit.
+  const matched = result.title && result.title !== label ? ` → matched "${result.title}"` : '';
+  rows.push([
+    'ok',
+    'Apple TV artwork',
+    `${result.artworkScope} art for "${label}"${matched} (${res.headers.get('content-type')})`,
+  ]);
 }
 
 /**
