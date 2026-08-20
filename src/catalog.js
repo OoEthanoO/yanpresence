@@ -249,12 +249,41 @@ export class AppleCatalog {
     this.disk = this.loadDisk();
   }
 
+  /**
+   * Loads the cache, dropping entries the read path would refuse anyway.
+   *
+   * Nothing removed expired entries before, so the file only ever grew -- and
+   * it is rewritten in full, synchronously, every time a newly seen track
+   * resolves. That turns into a steadily larger write on the playback path for
+   * entries that can never be used again. Pruning on load is free: an expired
+   * entry is already ignored by lookup(), so nothing observable changes.
+   */
   loadDisk() {
+    let raw;
     try {
-      return JSON.parse(fs.readFileSync(this.cacheFile, 'utf8'));
+      raw = JSON.parse(fs.readFileSync(this.cacheFile, 'utf8'));
     } catch {
       return {};
     }
+
+    const now = Date.now();
+    const kept = {};
+    let dropped = 0;
+    for (const [key, entry] of Object.entries(raw ?? {})) {
+      if (!entry || typeof entry !== 'object') continue;
+      const ttl = entry.result ? POSITIVE_TTL_MS : NEGATIVE_TTL_MS;
+      if (now - (entry.ts ?? 0) < ttl) kept[key] = entry;
+      else dropped += 1;
+    }
+
+    if (dropped) {
+      log.debug(`Catalog cache: dropped ${dropped} expired entries`);
+      // Written now rather than waiting for the next new track, so the saving
+      // is real even for someone who never plays anything unfamiliar again.
+      this.disk = kept;
+      this.saveDisk();
+    }
+    return kept;
   }
 
   saveDisk() {

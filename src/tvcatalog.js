@@ -19,6 +19,8 @@ import log from './log.js';
 const UTS_BASE = 'https://uts-api.itunes.apple.com/uts/v3';
 const TV_WEB = 'https://tv.apple.com';
 
+const ENTRY_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
 // Apple's numeric storefront ids, for the handful of regions likely to come up.
 // Anything unknown falls back to the US, which still resolves artwork.
 const STOREFRONTS = {
@@ -118,12 +120,34 @@ export class TvCatalog {
     this.inflight = new Map();
   }
 
+  /**
+   * Loads the cache, dropping entries lookup() would refuse anyway. Nothing
+   * pruned expired entries before, so the file only grew, and it is rewritten
+   * whole every time a new show resolves.
+   */
   loadDisk() {
+    let raw;
     try {
-      return JSON.parse(fs.readFileSync(this.cacheFile, 'utf8'));
+      raw = JSON.parse(fs.readFileSync(this.cacheFile, 'utf8'));
     } catch {
       return {};
     }
+
+    const now = Date.now();
+    const kept = {};
+    let dropped = 0;
+    for (const [key, entry] of Object.entries(raw ?? {})) {
+      if (!entry || typeof entry !== 'object') continue;
+      if (now - (entry.ts ?? 0) < ENTRY_TTL_MS) kept[key] = entry;
+      else dropped += 1;
+    }
+
+    if (dropped) {
+      log.debug(`Apple TV cache: dropped ${dropped} expired entries`);
+      this.disk = kept;
+      this.saveDisk();
+    }
+    return kept;
   }
 
   saveDisk() {
@@ -153,7 +177,7 @@ export class TvCatalog {
 
     const cached = this.disk[key];
     // 30 days, matching the music catalog cache.
-    if (cached && Date.now() - cached.ts < 30 * 24 * 60 * 60 * 1000) {
+    if (cached && Date.now() - cached.ts < ENTRY_TTL_MS) {
       this.memo.set(key, cached);
       await this.ensureSeasonCover(cached, season, key);
       return this.withCurrentSize(cached, season);
