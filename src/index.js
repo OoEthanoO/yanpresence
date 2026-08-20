@@ -183,19 +183,14 @@ export class YanPresence {
     const result = await this.tvCatalog.lookup(item);
     if (this.tvKey !== key) return; // moved on while we were looking
 
+    // Deliberately no page-artwork fallback here, unlike music: this method
+    // only runs under the apple-apps source -- WebSources.tv is null -- and
+    // TV.app items carry no artUrl for one to read. A show the catalog cannot
+    // match keeps placeholderImageKey.
     if (result?.artworkUrl) {
       this.tvArtworkUrl = result.artworkUrl;
       log.debug(`TV artwork (${result.artworkScope}) for ${result.title}: ${result.artworkUrl}`);
       this.render();
-    } else {
-      // The web player publishes its own poster through the Media Session API,
-      // which covers what the catalog search cannot resolve.
-      const fromPage = webArtwork(item);
-      if (fromPage) {
-        this.tvArtworkUrl = fromPage;
-        log.debug(`TV artwork from the page: ${fromPage}`);
-        this.render();
-      }
     }
 
     // Apple TV+ streams report no duration through TV.app, so without this
