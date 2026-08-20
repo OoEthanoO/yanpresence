@@ -9,7 +9,7 @@ import { CACHE_DIR, PROJECT_ROOT, SUPPORT_DIR, configPaths, loadConfig, validate
 import { DiscordRPC } from '../src/discord.js';
 import { createSources, resolveSourceKind } from '../src/sources.js';
 import { episodeCode } from '../src/tv.js';
-import { TvCatalog } from '../src/tvcatalog.js';
+import { TvCatalog, tvArtworkAt } from '../src/tvcatalog.js';
 import { YanPresence } from '../src/index.js';
 import log, { setLevel } from '../src/log.js';
 
@@ -26,8 +26,8 @@ Usage:
   yanpresence --dry-run       Run the full pipeline, print the activity JSON
                               instead of sending it (no clientId needed)
   yanpresence --init          Write a starter config and print its path
-  yanpresence --cache         List hosted artwork: format, dimensions, length, size
-  yanpresence --clear-cache   Drop cached artwork and lookups, forcing a re-encode
+  yanpresence --cache         List hosted artwork, and what Apple TV resolved
+  yanpresence --clear-cache   Drop every cache: artwork, lookups and tokens
   yanpresence --test-assets   Cycle candidate large_image values through your
                               presence so you can see which ones Discord renders
   yanpresence --help
@@ -153,20 +153,95 @@ function cmdCache() {
   console.log('    ffprobe -v error -show_entries stream=width,height,nb_frames \\');
   console.log('      -show_entries format=duration -of default=nw=1 \'<url>\'');
   console.log('');
+
+  cmdCacheTv();
 }
 
-function cmdClearCache() {
-  let removed = 0;
-  for (const name of ['artwork.json', 'catalog.json']) {
-    const file = path.join(CACHE_DIR, name);
-    if (fs.existsSync(file)) {
-      fs.rmSync(file);
-      removed += 1;
-      console.log(`Removed ${file}`);
+/**
+ * What the Apple TV catalog resolved, per show.
+ *
+ * Unlike music artwork this is never hosted -- the URLs point at Apple's CDN --
+ * so there is no size or encode to report. What matters instead is *which*
+ * title Apple matched and which season art came back, because the failure mode
+ * here is a confident match on the wrong show rather than a missing file.
+ */
+function cmdCacheTv() {
+  let cache;
+  try {
+    cache = JSON.parse(fs.readFileSync(path.join(CACHE_DIR, 'tv-catalog.json'), 'utf8'));
+  } catch {
+    return;
+  }
+
+  const entries = Object.entries(cache).filter(([, e]) => !e.miss);
+  const misses = Object.entries(cache).filter(([, e]) => e.miss);
+  if (!entries.length && !misses.length) return;
+
+  console.log('  Apple TV');
+  console.log('');
+  for (const [key, entry] of entries) {
+    const searched = key.split('|').slice(1).join('|');
+    const matched = entry.title && entry.title.toLowerCase() !== searched ? ` → "${entry.title}"` : '';
+    console.log(`  ✓ ${searched}${matched}  [${entry.type ?? '?'}]`);
+
+    const seasons = Object.entries(entry.seasons ?? {}).sort((a, b) => Number(a[0]) - Number(b[0]));
+    for (const [n, url] of seasons) {
+      console.log(`      S${n}  ${url ? 'own art' : 'no season art — uses the show cover'}`);
+      // Resolved rather than left as a {w}x{h} template: the point of this
+      // listing is to open the image and look at it. 1024 is the default
+      // artworkSize; this runs before any config is loaded.
+      if (url) console.log(`          ${tvArtworkAt(url, 1024)}`);
+    }
+    if (!seasons.length && entry.artworkTemplate) {
+      console.log(`          ${tvArtworkAt(entry.artworkTemplate, 1024)}`);
+    }
+
+    const runtimes = Object.entries(entry.durations ?? {}).filter(([, v]) => v);
+    if (runtimes.length) {
+      console.log(`      runtimes cached: ${runtimes.length}`);
     }
   }
-  if (!removed) console.log('Nothing cached.');
-  console.log('Artwork will be re-encoded and re-uploaded on the next play.');
+  for (const [key] of misses) {
+    console.log(`  ✗ ${key.split('|').slice(1).join('|')}  (no catalog match — placeholder art)`);
+  }
+  console.log('');
+}
+
+/**
+ * Clears everything in the cache directory, rather than a list of filenames.
+ *
+ * The list used to be hardcoded, and Apple TV support quietly outgrew it:
+ * tv-catalog.json and tv-token.json were left behind, so the one command you
+ * reach for when artwork looks wrong silently did not clear the TV lookups
+ * holding that artwork. Reading the directory cannot drift out of date the
+ * same way -- everything under CACHE_DIR is, by definition, reproducible.
+ */
+function cmdClearCache() {
+  let names = [];
+  try {
+    names = fs.readdirSync(CACHE_DIR).filter((name) => name.endsWith('.json'));
+  } catch {
+    /* no cache directory yet */
+  }
+
+  if (!names.length) {
+    console.log('Nothing cached.');
+    return;
+  }
+
+  for (const name of names) {
+    const file = path.join(CACHE_DIR, name);
+    try {
+      fs.rmSync(file);
+      console.log(`Removed ${file}`);
+    } catch (err) {
+      console.log(`Could not remove ${file}: ${err.message}`);
+    }
+  }
+
+  console.log('');
+  console.log('Artwork will be re-encoded and re-uploaded on the next play,');
+  console.log('and catalog lookups (music and Apple TV) re-resolved.');
 }
 
 /**
