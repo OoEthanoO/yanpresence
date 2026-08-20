@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { episodeCode, isEpisode } from '../src/tv.js';
 import os from 'node:os';
 
-import { tvArtworkAt, TvCatalog } from '../src/tvcatalog.js';
+import { tvArtworkAt, TvCatalog, titleScore } from '../src/tvcatalog.js';
 import { buildWatchActivity } from '../src/presence.js';
 import { DEFAULTS } from '../src/config.js';
 import { YanPresence } from '../src/index.js';
@@ -279,6 +279,33 @@ test('a square is still preferred for a film, should Apple ever publish one', as
     },
   });
   assert.match(await cat.movieCover('umc.cmc.film', 'token'), /thumb\/SQUARE\//);
+});
+
+test('a short generic title does not claim a longer show', () => {
+  // Measured against Apple's own catalog before this was tightened: bare
+  // containment matched "Bad" to Bad Sisters, "Dark" to Dark Matter, and
+  // "Friends" to Your Friends & Neighbours -- each putting a confidently wrong
+  // poster on the card. No artwork is better than the wrong artwork.
+  assert.equal(titleScore('Bad Sisters', 'Bad'), 0);
+  assert.equal(titleScore('Dark Matter', 'Dark'), 0);
+  assert.equal(titleScore('Your Friends & Neighbours', 'Friends'), 0);
+});
+
+test('a local title carrying extra decoration still matches', () => {
+  // The case bare containment existed to serve, and the direction that is
+  // actually safe: what we searched for spells out more than Apple's title.
+  assert.ok(titleScore('Mythic Quest', "Mythic Quest: Raven's Banquet") >= 0.85);
+  assert.ok(titleScore('Ted Lasso', 'Ted Lasso (2020)') >= 0.85);
+});
+
+test('exact titles score highest, whatever the casing', () => {
+  assert.equal(titleScore('Severance', 'severance'), 1);
+  assert.equal(titleScore('The Morning Show', 'The Morning Show'), 1);
+  // Apple's title being the longer one is trusted only when the two nearly
+  // agree in length: 8/9 passes, 3/4 does not.
+  assert.ok(titleScore('Severance', 'Severanc') >= 0.85, '8/9 is near enough');
+  assert.equal(titleScore('Silo', 'Sil'), 0, '3/4 is not');
+  assert.equal(titleScore('', 'Anything'), 0);
 });
 
 test('resolved artwork replaces the placeholder', () => {

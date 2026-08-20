@@ -224,12 +224,11 @@ export class TvCatalog {
     }
     if (!candidates.length) return null;
 
-    const wanted = norm(term);
     const scored = candidates
       .map((c) => ({
         c,
         score:
-          (norm(c.title) === wanted ? 1 : norm(c.title).includes(wanted) ? 0.8 : 0) +
+          titleScore(c.title, term) +
           // A film should match a Movie, an episode a Show.
           (wantMovie ? (c.type === 'Movie' ? 0.25 : 0) : c.type === 'Show' ? 0.25 : 0),
       }))
@@ -481,6 +480,34 @@ function squareUrl(image) {
 function pickUrl(image) {
   const url = image?.url;
   return typeof url === 'string' && url.includes('{w}') ? url : null;
+}
+
+/**
+ * How much a catalog title looks like the one we are searching for, 0..1.
+ *
+ * Containment alone is not enough, and the direction matters. A local title
+ * carrying extra decoration is normal -- "Mythic Quest: Raven's Banquet" for
+ * Apple's "Mythic Quest" -- so a candidate contained in what we searched for
+ * is trustworthy. The reverse is not: a short generic title sits inside plenty
+ * of unrelated shows, and treating that as a match put the wrong poster on the
+ * card. Measured against Apple's own catalog, "Bad" matched *Bad Sisters*,
+ * "Dark" matched *Dark Matter*, and "Friends" matched *Your Friends &
+ * Neighbours*. No artwork is better than confidently wrong artwork.
+ */
+export function titleScore(candidateTitle, wantedTitle) {
+  const candidate = norm(candidateTitle);
+  const wanted = norm(wantedTitle);
+  if (!candidate || !wanted) return 0;
+  if (candidate === wanted) return 1;
+
+  // What we searched for spells out more than Apple's title does.
+  if (wanted.includes(candidate)) return 0.9;
+
+  // Apple's title is the longer one. Only trust that when the two are nearly
+  // the same length, so a one-word title cannot claim a longer show.
+  if (candidate.includes(wanted) && wanted.length / candidate.length >= 0.8) return 0.85;
+
+  return 0;
 }
 
 function norm(s) {
