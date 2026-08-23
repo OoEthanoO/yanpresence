@@ -118,6 +118,7 @@ export class TvCatalog {
     this.disk = this.loadDisk();
     this.memo = new Map();
     this.inflight = new Map();
+    this.durationMisses = new Set();
   }
 
   /**
@@ -415,29 +416,69 @@ export class TvCatalog {
    * absent, and reading it directly throws -- so without this there is nothing
    * to build a progress bar from. Purchased items do carry it locally, which
    * is why this is only consulted as a fallback.
+   *
+   * The endpoint returns a *window* of episodes, not a season: a 7-episode
+   * season came back with 6 and a `totalEpisodeCount` of 7, so the last
+   * episode of every long season silently had no runtime and therefore no
+   * progress bar. `selectedEpisodeId` moves the window, so this walks it,
+   * anchoring each request on the last episode it has seen.
    */
   async episodeDurations(showId, seasonId, token) {
-    const body = await this.getJson(
+    const base =
       `${UTS_BASE}/shows/${encodeURIComponent(showId)}/episodes?utsk=${encodeURIComponent(token)}` +
-        `&caller=web&sf=${this.sf}&v=80&pfm=web&locale=en-US&utscf=OjAAAAAAAAA~` +
-        `&selectedSeasonId=${encodeURIComponent(seasonId)}`
-    );
-    const episodes = body?.data?.episodes ?? [];
+      `&caller=web&sf=${this.sf}&v=80&pfm=web&locale=en-US&utscf=OjAAAAAAAAA~` +
+      `&selectedSeasonId=${encodeURIComponent(seasonId)}`;
+
     const out = {};
-    for (const episode of episodes) {
-      const s = episode?.seasonNumber;
-      const e = episode?.episodeNumber;
-      const seconds = Number(episode?.duration);
-      // The response carries the neighbouring seasons too, so everything it
-      // hands back is kept -- a binge then costs one request per season.
-      if (Number.isInteger(s) && Number.isInteger(e) && seconds > 0) out[`${s}|${e}`] = seconds;
+    const seenSlots = new Set();
+    let anchor = null;
+
+    // Bounded rather than "until done": this walks an undocumented endpoint,
+    // and a window that stops advancing must not become an infinite loop.
+    for (let page = 0; page < 8; page += 1) {
+      const url = anchor ? `${base}&selectedEpisodeId=${encodeURIComponent(anchor)}` : base;
+      const body = await this.getJson(url);
+      const episodes = body?.data?.episodes ?? [];
+      if (!episodes.length) break;
+
+      const before = seenSlots.size;
+      for (const episode of episodes) {
+        const s = episode?.seasonNumber;
+        const e = episode?.episodeNumber;
+        if (!Number.isInteger(s) || !Number.isInteger(e)) continue;
+        seenSlots.add(`${s}|${e}`);
+        // Neighbouring seasons ride along in the same response, so everything
+        // it hands back is kept -- a binge then costs one walk per season.
+        // Collection is keyed on the season and episode numbers, never on the
+        // episode id: an entry without an id still has a runtime worth having.
+        const seconds = Number(episode?.duration);
+        if (seconds > 0) out[`${s}|${e}`] = seconds;
+      }
+
+      const total = Number(body?.data?.totalEpisodeCount) || 0;
+      if (total && seenSlots.size >= total) break;
+      // Nothing new means the window will not move again.
+      if (seenSlots.size === before) break;
+
+      // Only the anchor needs an id. Without one the window cannot be moved,
+      // so what has been collected is all there is.
+      const last = episodes[episodes.length - 1]?.id;
+      if (!last || last === anchor) break;
+      anchor = last;
     }
+
     return out;
   }
 
   /**
    * Runtime in seconds for the episode being watched, or null. Cached with the
-   * show entry, so one request covers the whole season.
+   * show entry, so one walk of the season covers a binge.
+   *
+   * A failure is remembered only for this process, never on disk. It used to
+   * be persisted as a null, which pinned one bad lookup for thirty days: the
+   * windowing bug above meant the last episode of a season resolved to null
+   * once and then stayed null, so fixing the fetch would not have fixed the
+   * card until the cache expired. Only real runtimes are written down.
    */
   async durationFor(item) {
     if (!item?.isEpisode) return null;
@@ -454,22 +495,36 @@ export class TvCatalog {
     entry.durations ??= {};
     const slot = `${item.season}|${item.episode}`;
 
-    if (entry.durations[slot] === undefined) {
-      const token = await this.tokens.get();
-      if (!token) return null;
-      const found = await this.episodeDurations(entry.id, seasonId, token).catch((err) => {
-        log.debug(`Episode duration lookup failed: ${err.message}`);
-        return null;
-      });
-      if (found) Object.assign(entry.durations, found);
-      // null remembers a miss, so a runtime Apple does not publish is not
-      // re-requested on every tick.
-      entry.durations[slot] ??= null;
+    // A stored null is treated as "not known", not as "known to be absent",
+    // so caches written before this retry themselves.
+    if (entry.durations[slot] > 0) return entry.durations[slot];
+
+    const missKey = `${key}|${slot}`;
+    if (this.durationMisses.has(missKey)) return null;
+
+    const token = await this.tokens.get();
+    if (!token) return null;
+
+    const found = await this.episodeDurations(entry.id, seasonId, token).catch((err) => {
+      log.debug(`Episode duration lookup failed: ${err.message}`);
+      return null;
+    });
+
+    if (found) {
+      for (const [at, seconds] of Object.entries(found)) {
+        if (seconds > 0) entry.durations[at] = seconds;
+      }
       this.disk[key] = entry;
       this.saveDisk();
     }
 
-    return entry.durations[slot] ?? null;
+    if (entry.durations[slot] > 0) return entry.durations[slot];
+
+    // Remembered for this process only: a show Apple publishes no runtime for
+    // should not re-walk its season on every episode change, but a restart
+    // gets to try again.
+    this.durationMisses.add(missKey);
+    return null;
   }
 
   async getJson(url) {

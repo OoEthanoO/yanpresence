@@ -240,6 +240,76 @@ test('episode runtime is recovered when TV.app reports none', async () => {
   assert.equal(calls, 2);
 });
 
+test('the episode window is walked, so late episodes still get a runtime', async () => {
+  // The endpoint returns a window, not a season: a 7-episode season came back
+  // with 6 and totalEpisodeCount 7, so the last episode of every long season
+  // silently had no runtime and therefore no progress bar.
+  const cat = new TvCatalog({ storefront: 'ca', cacheDir: os.tmpdir(), artworkSize: 1024 });
+  const pages = [
+    { episodes: [1, 2, 3, 4, 5, 6].map((n) => ({ id: `e${n}`, seasonNumber: 1, episodeNumber: n, duration: 100 + n })), totalEpisodeCount: 7 },
+    { episodes: [2, 3, 4, 5, 6, 7].map((n) => ({ id: `e${n}`, seasonNumber: 1, episodeNumber: n, duration: 100 + n })), totalEpisodeCount: 7 },
+  ];
+  const asked = [];
+  cat.getJson = async (url) => {
+    asked.push(url);
+    return { data: pages[Math.min(asked.length - 1, pages.length - 1)] };
+  };
+
+  const out = await cat.episodeDurations('umc.cmc.show', 'umc.cmc.s1', 'token');
+  assert.equal(out['1|7'], 107, 'the episode past the first window');
+  assert.equal(Object.keys(out).length, 7);
+  assert.ok(asked.length >= 2, 'the window was walked');
+  assert.match(asked[1], /selectedEpisodeId=e6/, 'anchored on the last episode seen');
+});
+
+test('a window that stops advancing does not loop forever', async () => {
+  const cat = new TvCatalog({ storefront: 'ca', cacheDir: os.tmpdir(), artworkSize: 1024 });
+  let calls = 0;
+  // Claims more episodes exist but never returns a new one.
+  cat.getJson = async () => {
+    calls += 1;
+    return {
+      data: {
+        episodes: [{ id: 'e1', seasonNumber: 1, episodeNumber: 1, duration: 60 }],
+        totalEpisodeCount: 99,
+      },
+    };
+  };
+
+  const out = await cat.episodeDurations('umc.cmc.show', 'umc.cmc.s1', 'token');
+  assert.deepEqual(out, { '1|1': 60 });
+  assert.ok(calls <= 8, `bounded, made ${calls} requests`);
+});
+
+test('a runtime miss is never written to disk', async () => {
+  // Persisting a null pinned one bad lookup for thirty days, so fixing the
+  // fetch would not have fixed the card until the cache expired.
+  const cat = new TvCatalog({ storefront: 'ca', cacheDir: os.tmpdir(), artworkSize: 1024 });
+  cat.getJson = async () => ({ data: { episodes: [], totalEpisodeCount: 0 } });
+  const entry = { id: 'umc.cmc.show', seasonIds: { 1: 'umc.cmc.s1' }, durations: {} };
+  cat.memo.set('ca|show', entry);
+
+  const item = { isEpisode: true, show: 'Show', name: 'x', season: 1, episode: 3 };
+  assert.equal(await cat.durationFor(item), null);
+  assert.equal(entry.durations['1|3'], undefined, 'no null persisted');
+});
+
+test('a stored null is retried rather than trusted', async () => {
+  // Caches written before the windowing fix carry nulls; they must heal.
+  const cat = new TvCatalog({ storefront: 'ca', cacheDir: os.tmpdir(), artworkSize: 1024 });
+  cat.getJson = async () => ({
+    data: {
+      episodes: [{ id: 'e7', seasonNumber: 1, episodeNumber: 7, duration: 2640 }],
+      totalEpisodeCount: 1,
+    },
+  });
+  const entry = { id: 'umc.cmc.show', seasonIds: { 1: 'umc.cmc.s1' }, durations: { '1|7': null } };
+  cat.memo.set('ca|show', entry);
+
+  const item = { isEpisode: true, show: 'Show', name: 'x', season: 1, episode: 7 };
+  assert.equal(await cat.durationFor(item), 2640);
+});
+
 test('a film, or a show with no season id, asks for no runtime', async () => {
   const cat = new TvCatalog({ storefront: 'ca', cacheDir: os.tmpdir(), artworkSize: 1024 });
   cat.getJson = async () => assert.fail('should not have made a request');
