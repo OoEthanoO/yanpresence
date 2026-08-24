@@ -58,6 +58,75 @@ test('a playing track comes out shaped like Music.app produces', () => {
   assert.equal(snapshot.track.albumKey, 'ella langley\0hungover');
 });
 
+/*
+ * The Windows app does not fill the album field. It publishes
+ * "<artist> — <album>" as the artist *and* as the album artist, and leaves
+ * AlbumTitle empty. Captured live from Apple Music 1.1540.
+ */
+const CONCATENATED = {
+  channel: 'music',
+  state: 'playing',
+  name: 'LOV3 (feat. Bryan Chase & Okasian)',
+  artist: 'Sik-K & Lil Moshpit — K-FLIP+',
+  albumArtist: 'Sik-K & Lil Moshpit — K-FLIP+',
+  album: '',
+  subtitle: '',
+  duration: 236,
+  position: 86.506,
+  hasArtwork: true,
+  appId: `${APPLE_MUSIC_APP_ID}_nzyj5cx40ttqa!App`,
+};
+
+test('an artist field carrying the album is split back apart', () => {
+  const { track } = normalizeMusic(CONCATENATED);
+
+  // Left alone this puts "Sik-K & Lil Moshpit — K-FLIP+" on the card's artist
+  // line and hands the catalog an artist who does not exist.
+  assert.equal(track.artist, 'Sik-K & Lil Moshpit');
+  assert.equal(track.album, 'K-FLIP+');
+  assert.equal(track.albumArtist, 'Sik-K & Lil Moshpit');
+  assert.equal(track.albumKey, 'sik-k & lil moshpit\0k-flip+');
+});
+
+test('a properly filled album is never second-guessed', () => {
+  // The empty album is the guard, so a payload Apple filled in correctly —
+  // including one whose artist genuinely contains an em dash — passes through
+  // untouched, and this heals itself if the app is ever fixed.
+  const { track } = normalizeMusic({
+    ...CONCATENATED,
+    artist: 'Godspeed You! Black Emperor — Live',
+    album: 'Lift Your Skinny Fists',
+  });
+
+  assert.equal(track.artist, 'Godspeed You! Black Emperor — Live');
+  assert.equal(track.album, 'Lift Your Skinny Fists');
+});
+
+test('splitting takes the last separator, keeping the artist whole', () => {
+  // Ambiguous by construction, and unresolvable in principle. Keeping the
+  // artist intact is the better failure: it is what goes on the status line
+  // and what the catalog scores against, while the album feeds a cache key.
+  const { track } = normalizeMusic({
+    ...CONCATENATED,
+    artist: 'A — B — C',
+  });
+
+  assert.equal(track.artist, 'A — B');
+  assert.equal(track.album, 'C');
+});
+
+test('a hyphen is not a separator, so editorial suffixes survive', () => {
+  // Apple's own titles use " - Single" and " - EP"; the joiner is an em dash,
+  // and the two must not be confused.
+  const { track } = normalizeMusic({
+    ...CONCATENATED,
+    artist: 'Ella Langley - Single',
+  });
+
+  assert.equal(track.artist, 'Ella Langley - Single');
+  assert.equal(track.album, '');
+});
+
 test('a position past the end is clamped, not believed', () => {
   // The watcher extrapolates the playhead between the app's own timeline
   // updates, so it can overshoot a track that ended while nobody was looking.

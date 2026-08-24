@@ -744,6 +744,31 @@ reason a fresh install refuses to start, and that message would otherwise go to
 a console nobody has. A start-up failure in tray mode also raises a dialog box,
 since "nothing happened" is not an error message.
 
+### The album arrives inside the artist field
+
+Worth knowing about, because it is invisible until you look. The Windows Apple
+Music app does not fill the media session's album field. It publishes
+`"<artist> — <album>"` as the **artist**, and again as the album artist, and
+leaves the album title empty:
+
+```
+Title       LOV3 (feat. Bryan Chase & Okasian)
+Artist      Sik-K & Lil Moshpit — K-FLIP+     ← the album is in here
+AlbumTitle  (empty)
+```
+
+Passed through, that puts `Sik-K & Lil Moshpit — K-FLIP+` on the card's artist
+line and hands the catalog an artist who does not exist — which costs you the
+links and the album art, not just a cosmetic slip. So it is split back apart on
+the way in.
+
+The empty album is the guard, and it is the part that cannot happen by
+accident: a payload Apple filled in properly is passed through untouched, so
+this heals itself if a future version of the app stops doing it. The separator
+is a spaced **em dash**, which is not what Apple's own catalog titles use for
+editorial suffixes (`" - Single"`, `" - EP"` are hyphens), so the two do not
+collide.
+
 ### Apple TV on Windows
 
 Works, with one caveat worth knowing about. On macOS, TV.app answers `show`,

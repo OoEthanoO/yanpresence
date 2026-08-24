@@ -73,14 +73,16 @@ export function normalizeMusic(raw) {
 
   const duration = positive(raw.duration);
   const position = clamp(raw.position, duration);
+  const { artist, album } = splitArtistAlbum(raw);
 
   const track = {
     name: str(raw.name),
-    artist: str(raw.artist),
-    album: str(raw.album),
-    // SMTC carries an album artist field and Apple Music fills it in, but it
-    // falls back to the track artist when the album has no separate one.
-    albumArtist: str(raw.albumArtist),
+    artist,
+    album,
+    // SMTC carries an album artist field, but the Windows app fills it with
+    // the same string it puts in the artist field rather than with an album
+    // artist, so there is nothing extra to be had from it.
+    albumArtist: artist,
     duration,
     position,
     // Windows publishes no stable identifier for what is playing; identity
@@ -102,6 +104,45 @@ export function normalizeMusic(raw) {
   track.albumKey = `${track.albumArtist || track.artist}\0${track.album}`.toLowerCase();
 
   return { state, active: true, track, receivedAt: Date.now() };
+}
+
+// What the Windows Apple Music app joins the two fields with: a spaced em
+// dash. Not a hyphen, which is what Apple's own catalog titles use for
+// editorial suffixes (" - Single", " - EP"), so the two do not collide.
+const ARTIST_ALBUM_JOINER = ' — ';
+
+/**
+ * The artist and the album, which arrive as one field.
+ *
+ * The Windows app publishes `"<artist> — <album>"` as the SMTC artist *and*
+ * as the album artist, and leaves the album title empty:
+ *
+ *   Title       LOV3 (feat. Bryan Chase & Okasian)
+ *   Artist      Sik-K & Lil Moshpit — K-FLIP+
+ *   AlbumTitle  (empty)
+ *
+ * Left alone that puts "Sik-K & Lil Moshpit — K-FLIP+" on the card's artist
+ * line, and hands the catalog a nonexistent artist and no album to score
+ * against -- so it is worth unpicking rather than passing through.
+ *
+ * The guard is the empty album, which is the part that cannot happen by
+ * accident: a payload where Apple filled the field in properly is left
+ * untouched, so this heals itself if a future version of the app stops doing
+ * it. The split takes the LAST separator, because an em dash inside a name is
+ * rare in either field and, when one does occur, keeping the artist whole
+ * matters more -- it is what goes on the status line and what the catalog
+ * scores against, while the album mostly feeds a cache key.
+ */
+export function splitArtistAlbum(raw) {
+  const artist = str(raw.artist);
+  const album = str(raw.album);
+  if (album || !artist.includes(ARTIST_ALBUM_JOINER)) return { artist, album };
+
+  const at = artist.lastIndexOf(ARTIST_ALBUM_JOINER);
+  return {
+    artist: artist.slice(0, at).trim(),
+    album: artist.slice(at + ARTIST_ALBUM_JOINER.length).trim(),
+  };
 }
 
 /* ------------------------------------------------------------------ */
