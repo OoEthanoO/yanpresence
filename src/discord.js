@@ -7,6 +7,9 @@ import path from 'node:path';
 
 import log from './log.js';
 
+// Windows exposes its named pipes as a filesystem rooted here.
+const PIPE_ROOT = '\\\\.\\pipe\\';
+
 const OP_HANDSHAKE = 0;
 const OP_FRAME = 1;
 const OP_CLOSE = 2;
@@ -17,7 +20,8 @@ const OP_PONG = 4;
  * Minimal Discord local RPC client, speaking the IPC framing directly.
  *
  * The desktop client listens on a unix socket named `discord-ipc-N` in the
- * user's temp dir. Frames are [op:int32le][len:int32le][json].
+ * user's temp dir -- or, on Windows, a named pipe at `\\.\pipe\discord-ipc-N`.
+ * Frames are [op:int32le][len:int32le][json], identically on both.
  */
 export class DiscordRPC extends EventEmitter {
   constructor({ clientId }) {
@@ -34,6 +38,8 @@ export class DiscordRPC extends EventEmitter {
   }
 
   static candidateSockets() {
+    if (process.platform === 'win32') return DiscordRPC.windowsPipes();
+
     const roots = [
       process.env.XDG_RUNTIME_DIR,
       process.env.TMPDIR,
@@ -68,6 +74,45 @@ export class DiscordRPC extends EventEmitter {
     return [...new Set(paths)];
   }
 
+  /** `\\.\pipe\discord-ipc-0` through `-9`, the Windows half of the same idea. */
+  static windowsPipes() {
+    return Array.from({ length: 10 }, (_, i) => `${PIPE_ROOT}discord-ipc-${i}`);
+  }
+
+  /**
+   * The candidates that actually exist, which is a different question on each
+   * platform.
+   *
+   * A unix socket answers `stat`. A Windows named pipe does not -- statting one
+   * fails with EBUSY, so the obvious filter rejects every pipe on the machine,
+   * including the live one. What does work is listing the pipe filesystem,
+   * which Windows exposes as a directory.
+   */
+  static existingSockets() {
+    if (process.platform === 'win32') {
+      let names;
+      try {
+        names = fs.readdirSync(PIPE_ROOT);
+      } catch {
+        // Unreadable pipe root: report every candidate and let connecting be
+        // the test. Trying ten pipes costs nothing.
+        return DiscordRPC.windowsPipes();
+      }
+      return names
+        .filter((name) => /^discord-ipc-\d$/.test(name))
+        .sort()
+        .map((name) => `${PIPE_ROOT}${name}`);
+    }
+
+    return DiscordRPC.candidateSockets().filter((p) => {
+      try {
+        return fs.statSync(p).isSocket();
+      } catch {
+        return false;
+      }
+    });
+  }
+
   connect() {
     this.stopped = false;
     this.attempt();
@@ -76,13 +121,7 @@ export class DiscordRPC extends EventEmitter {
   attempt() {
     if (this.stopped || this.socket) return;
 
-    const candidates = DiscordRPC.candidateSockets().filter((p) => {
-      try {
-        return fs.statSync(p).isSocket();
-      } catch {
-        return false;
-      }
-    });
+    const candidates = DiscordRPC.existingSockets();
 
     if (!candidates.length) {
       this.scheduleReconnect('no Discord IPC socket found (is Discord running?)');

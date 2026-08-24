@@ -1,7 +1,7 @@
 {
   "name": "yanpresence",
   "version": "1.0.0",
-  "description": "Apple Music -> Discord Rich Presence for macOS and Linux",
+  "description": "Apple Music -> Discord Rich Presence for macOS, Windows and Linux",
   "type": "module",
   "bin": {
     "yanpresence": "./bin/yanpresence.js"
@@ -14,14 +14,18 @@
     "install-agent": "bash launchd/install.sh",
     "uninstall-agent": "bash launchd/uninstall.sh",
     "install-service": "bash systemd/install.sh",
-    "uninstall-service": "bash systemd/uninstall.sh"
+    "uninstall-service": "bash systemd/uninstall.sh",
+    "install-windows": "powershell -NoProfile -ExecutionPolicy Bypass -File windows/install.ps1",
+    "uninstall-windows": "powershell -NoProfile -ExecutionPolicy Bypass -File windows/uninstall.ps1",
+    "make-icon": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-icon.ps1"
   },
   "engines": {
     "node": ">=18"
   },
   "os": [
     "darwin",
-    "linux"
+    "linux",
+    "win32"
   ],
   "license": "MIT",
   "private": true

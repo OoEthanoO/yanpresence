@@ -1,8 +1,9 @@
 # yanpresence
 
-Apple Music → Discord Rich Presence, for macOS and Linux.
+Apple Music → Discord Rich Presence, for macOS, Windows and Linux.
 
-Watches the **Music** app over Apple Events on macOS, and the **web players** at
+Watches the **Music** app over Apple Events on macOS, the **Apple Music** and
+**Apple TV** apps over the media session on Windows, and the **web players** at
 `music.apple.com` and `tv.apple.com` on Linux, and mirrors what you're playing
 into Discord — laid out like Discord's own Spotify integration, with the song
 name on your status line instead of the artist, full-size album art, and the
@@ -30,12 +31,15 @@ And expanded, when someone clicks into your profile:
 
 ## What it does
 
-- **Two ways in, one pipeline.** On macOS, playback state comes from Apple
-  Events sent to `Music.app` and `TV.app`. On Linux, it comes from the Apple
-  Music web player in your browser — over a companion extension, over MPRIS on
-  the session bus, or both. Everything past that point (catalog lookups, links,
-  artwork, the card itself) is identical, because the sources hand back
-  identical snapshots. Apple TV is macOS-only; see
+- **Three ways in, one pipeline.** On macOS, playback state comes from Apple
+  Events sent to `Music.app` and `TV.app`. On Windows, it comes from the System
+  Media Transport Controls session the Apple Music and Apple TV apps publish —
+  the record behind the flyout over the volume overlay. On Linux, it comes from
+  the Apple Music web player in your browser — over a companion extension, over
+  MPRIS on the session bus, or both. Everything past that point (catalog
+  lookups, links, artwork, the card itself) is identical, because the sources
+  hand back identical snapshots. Apple TV works on macOS and Windows and not in
+  a browser; see [Windows](#windows) and
   [Linux and the web player](#linux-and-the-web-player).
 - **The song name on the status line.** Discord's `status_display_type` picks
   which field lands on the one-line status under your name. Spotify sets it to
@@ -63,15 +67,23 @@ And expanded, when someone clicks into your profile:
 
 ## Requirements
 
-- **macOS** with the Music app (and TV.app for Apple TV), or **Linux** with a
-  browser for Apple Music (tested on Ubuntu 26.04, Chrome 151, Firefox 149)
+- One of:
+  - **macOS** with the Music app (and TV.app for Apple TV)
+  - **Windows 10/11** with the Apple Music app (and the Apple TV app), both
+    from the Microsoft Store (tested on Windows 11 26200, Apple Music 1.1540)
+  - **Linux** with a browser for Apple Music (tested on Ubuntu 26.04,
+    Chrome 151, Firefox 149)
 - Node.js 18+ (developed on 26)
 - The Discord **desktop** app running (the web client has no local IPC socket)
 - `ffmpeg` — only for animated artwork (`brew install ffmpeg` /
-  `sudo apt install ffmpeg`)
+  `sudo apt install ffmpeg` / `winget install Gyan.FFmpeg`)
 - `webp` — only if you switch `animatedArtwork.format` to `"webp"`
   (`brew install webp` / `sudo apt install webp`); the default AVIF path needs
   just ffmpeg
+
+On Windows, playback is read through **Windows PowerShell 5.1**, which ships
+with Windows and needs no install. Not PowerShell 7: the media session is a
+WinRT API, and `pwsh` cannot project WinRT types without the Windows SDK.
 
 On Linux, `busctl` (part of systemd, already installed) is used for the MPRIS
 source, and the companion extension in [`browser/`](browser/) is needed if you
@@ -107,7 +119,8 @@ node bin/yanpresence.js --init
 ```
 
 That writes `~/Library/Application Support/yanpresence/config.json` on macOS,
-or `~/.config/yanpresence/config.json` on Linux. Open it and paste your
+`%APPDATA%\yanpresence\config.json` on Windows, or
+`~/.config/yanpresence/config.json` on Linux. Open it and paste your
 Application ID into `clientId`.
 
 On Linux, also install the browser extension if you use Chrome:
@@ -120,14 +133,19 @@ On Linux, also install the browser extension if you use Chrome:
 node bin/yanpresence.js --doctor
 ```
 
-This verifies the playback source — Music.app on macOS, the extension bridge and
-every MPRIS player on Linux — plus the Discord IPC socket, the Apple Music
-catalog lookup, and the animated-artwork toolchain, and tells you exactly what's
-missing.
+This verifies the playback source — Music.app on macOS, the two media sessions
+on Windows, the extension bridge and every MPRIS player on Linux — plus the
+Discord IPC socket (a named pipe on Windows), the Apple Music catalog lookup,
+and the animated-artwork toolchain, and tells you exactly what's missing.
 
 On macOS, the first run triggers the automation prompt — **allow your terminal
 to control Music**. If you miss it, it's under *System Settings → Privacy &
 Security → Automation*.
+
+On Windows there is no permission prompt: a media session is public to the
+session, so nothing has to be granted. Open the Apple Music app before running
+`--doctor` — it registers its session as soon as it launches, so the check can
+tell "not running" from "cannot see it".
 
 On Linux, play something in a browser before running `--doctor`: it reports what
 each player looks like from the outside, which is how you find out whether your
@@ -139,16 +157,40 @@ browser identifies itself (see below).
 node bin/yanpresence.js
 ```
 
+Every example here spells out `node bin/yanpresence.js`, which always works from
+the checkout. If you would rather type `yanpresence`, link it onto your PATH
+once:
+
+```bash
+npm link
+```
+
+That is the only thing that puts the bare command there — there are no
+dependencies to install, so an `npm install` alone does not do it. Undo it with
+`npm unlink -g yanpresence`.
+
+On Windows, the thing you probably want instead is the Start menu entry:
+
+```bash
+npm run install-windows
+```
+
+That is the whole Windows setup — see [Windows](#windows) below for what it
+writes and how to quit the thing once it is running.
+
 To have it start at login:
 
 ```bash
-npm run install-agent      # macOS  — launchd
-npm run install-service    # Linux  — systemd user unit
+npm run install-agent                    # macOS   — launchd
+npm run install-service                  # Linux   — systemd user unit
+npm run install-windows -- -Startup      # Windows — Startup folder shortcut
 ```
 
-Logs go to `~/Library/Logs/yanpresence/` on macOS, and to the journal on Linux
-(`journalctl --user -u yanpresence -f`). Remove either with
-`npm run uninstall-agent` / `npm run uninstall-service`.
+Logs go to `~/Library/Logs/yanpresence/` on macOS, to the journal on Linux
+(`journalctl --user -u yanpresence -f`), and to
+`%LOCALAPPDATA%\yanpresence\cache\yanpresence.log` on Windows. Remove any of
+them with `npm run uninstall-agent` / `npm run uninstall-service` /
+`npm run uninstall-windows`.
 
 On Linux, running it as the user service is also the *reliable* way: a
 snap-packaged browser only answers MPRIS queries from unconfined callers, and a
@@ -319,50 +361,68 @@ the settings up on webhook hosting, `onOversize` decides what happens:
 Setting `"maxBytes": null` disables the check entirely, which is the right thing
 with `command` hosting.
 
-### Hardware encoding, and why it is off
+### Hardware encoding, and which GPU path actually works
 
-The AV1 encode can be handed to a GPU, and on this machine it was — until the
-output was checked against the only reader that matters.
+The AV1 encode can be handed to a GPU. Whether that is a good idea turns out to
+depend entirely on which API you go through — and the only way to find out was
+to check the output against the one reader that matters, because the Discord
+desktop client is Electron and Chromium is fussy about AVIF.
 
-Measured on Ubuntu 26.04 with a Radeon 780M (RDNA3) and an RTX 4070, ffmpeg
-8.0.1, on a 20.6s 2160×2160 master encoded to 1024px:
+**VAAPI on Linux: no.** Measured on Ubuntu 26.04 with a Radeon 780M (RDNA3) and
+an RTX 4070, ffmpeg 8.0.1, on a 20.6s 2160×2160 master encoded to 1024px:
 
 | | time | size | renders in Discord |
 |---|---|---|---|
 | `libsvtav1` (CPU) | 2.6s | 10.8 MB | **yes** |
 | `av1_vaapi` (780M) | 1.5s | 10.2 MB | **no** — grey "?" |
 
-Chromium refuses to decode the VAAPI encoder's AVIF, and the Discord desktop
-client is Electron. Every variant fails the same way — CQP, VBR, a single tile,
-an explicit level, and even a single still frame — so it is not the animation,
-the rate control or the container. ffmpeg and ffprobe read the file back
-perfectly, which is exactly what makes it dangerous: the encode *looks* like it
-worked.
+Chromium refuses to decode the VAAPI encoder's AVIF. Every variant fails the
+same way — CQP, VBR, a single tile, an explicit level, and even a single still
+frame — so it is not the animation, the rate control or the container. ffmpeg
+and ffprobe read the file back perfectly, which is exactly what makes it
+dangerous: the encode *looks* like it worked.
 
-Hardware **decode** does not help either. Software decode of the same master
-took 2.9s, against 4.9s on NVDEC and 3.9s on VAAPI: initialising a vendor's
-stack costs more than decoding twenty seconds of H.264 saves.
+**AMF on Windows: yes.** The same silicon, through AMD's own SDK rather than
+Mesa, produces AVIF that Chromium reads. Measured on Windows 11 with that same
+Radeon 780M, ffmpeg 9.0, on a 20s 2160×2160 master encoded to 1024px:
 
-So the encode stays on the CPU. It runs once per album and the result is cached
-forever, which is the other half of the argument — a second saved on a job you
-run once is not worth a card nobody can see.
+| | time | size | renders in Chromium 148 |
+|---|---|---|---|
+| `libsvtav1` (CPU) | 6.5s | 21.4 MB | **yes** |
+| `av1_amf` (780M) | 5.7s | 19.6 MB | **yes** |
+
+Structurally the two files are identical — a still cover image plus a 180-frame
+animation track, same dimensions, same duration. So it was the driver's
+bitstream packing that was the problem on Linux, not the hardware.
+
+That is why `"auto"` means different things on the two platforms:
 
 ```jsonc
 "animatedArtwork": {
   "hardware": {
-    "mode": "off",         // "off" (CPU) | "auto" (also CPU) | "vaapi" (force the GPU)
+    "mode": "auto",        // "auto" | "off" | "amf" | "vaapi"
     "device": "auto",      // "auto" | "amd" | "intel" | "nvidia" | "/dev/dri/renderD129"
     "decode": false,       // hardware decode; independent of mode
-    "globalQuality": null  // override the CRF -> VAAPI quality conversion
+    "globalQuality": null  // override the CRF -> quantizer conversion
   }
 }
 ```
 
+`"auto"` hands the encode to **AMF** on Windows when there is an AMD adapter
+and an ffmpeg built with `av1_amf`, and to the **CPU** everywhere else. Whatever
+it picks is verified rather than trusted: an encode that writes a file ffprobe
+cannot read counts as a failure, and the CPU encoder takes over for the rest of
+the run.
+
+AMF needs no device argument and no `hwupload`, unlike VAAPI. It takes software
+frames and uploads them itself, and it enumerates only AMD devices — so on a
+laptop with a discrete NVIDIA card as well, there is no wrong card for it to
+pick. That is a real difference: VAAPI has to be told which render node to use
+or it silently hands the wrong card's frames to the encoder.
+
 `"vaapi"` is kept for different hardware, a newer driver, or a consumer that is
-not Chromium. It warns when used, verifies the result, and falls back to the CPU
-encoder for the rest of the run if the encode fails outright. If you switch it
-and the art goes grey, switch back and run `--clear-cache` so the broken encode
-is replaced.
+not Chromium. It warns when used. If you switch it on and the art goes grey,
+switch back and run `--clear-cache` so the broken encode is replaced.
 
 Two details worth keeping if you do use it. The device is chosen **by vendor,
 not by number** — `/dev/dri/renderD128` is the usual hardcoded VAAPI default and
@@ -371,6 +431,14 @@ VAAPI device is passed as `-init_hw_device` + `-filter_hw_device` rather than
 `-vaapi_device`, because any `-hwaccel` on the input side otherwise becomes the
 default filter device and `hwupload` hands NVIDIA frames to the AMD encoder,
 which fails with `EINVAL` and writes nothing.
+
+Hardware **decode** is a separate switch and stays off. Software decode of the
+Linux master took 2.9s against 4.9s on NVDEC and 3.9s on VAAPI; on Windows,
+`d3d11va` took the CPU-encoded run from 6.5s to 6.1s but pushed the AMF one
+from 5.7s to **7.5s**, because the frames have to come back to system memory for
+the scale filter and then go up again. Initialising a vendor's stack costs about
+what decoding twenty seconds of H.264 saves. Turn it on with `"decode": true`
+if your hardware disagrees.
 
 NVENC is never used for AVIF. Ada does encode AV1, but AV1-in-HEIF out of NVENC
 is not a combination anyone supports.
@@ -430,13 +498,16 @@ Cache and encoded artwork go beside it on macOS, and under
 | `clientId` | — | **Required.** Discord Application ID. |
 | `activityName` | `"Apple Music"` | Keep in sync with the app's name in the portal. |
 | `storefront` | `"us"` | Apple Music storefront for lookups and links. |
-| `source` | `"auto"` | Where playback state comes from: `auto` (Music.app on macOS, the web players elsewhere), `apple-apps`, `browser`. |
+| `source` | `"auto"` | Where playback state comes from: `auto` (the Apple apps on macOS and Windows, the web player on Linux), `apple-apps`, `browser`. |
 | `browser.bridge.enabled` | `true` | Loopback endpoint the companion extension posts to. Required for Chrome. |
 | `browser.bridge.port` | `8763` | Port for that endpoint, on `127.0.0.1`. |
 | `browser.bridge.token` | `""` | Optional shared secret; paste the same value into the extension's options. |
 | `browser.mpris.enabled` | `true` | Read players off the session bus. Identifies Apple Music by itself in Firefox. |
 | `browser.mpris.players` | `{}` | Map an MPRIS bus name fragment to `music` / `tv` / `ignore`, for browsers that publish no page URL. |
 | `statusDisplay` | `"details"` | Which field lands on your status line: `details` (song), `state` (artist, Spotify's choice), `name`. |
+| `windows.tray` | `false` | Windows: show a notification-area icon with a Quit item. The Start menu shortcut passes `--tray` itself. See [Windows](#windows). |
+| `windows.appIds.music` | `"AppleInc.AppleMusicWin"` | Windows: AUMID prefix of the app whose media session is Apple Music. |
+| `windows.appIds.tv` | `"AppleInc.AppleTVWin"` | Windows: the same, for Apple TV. |
 | `artworkSize` | `1024` | Square px requested from Apple's CDN. |
 | `showSmallImage` | `true` | Small corner badge. |
 | `smallImageKey` | `"applemusic"` | Name of the Art Asset uploaded in the portal. |
@@ -447,7 +518,7 @@ Cache and encoded artwork go beside it on macOS, and under
 | `minUpdateIntervalMs` | `2500` | Floor between `SET_ACTIVITY` frames; Discord rate-limits these. |
 | `seekToleranceSec` | `2` | Drift before a seek is assumed and the timeline is rebased. |
 | `clearDelayMs` | `5000` | How long playback must be non-playing — paused, stopped or quit — before the presence clears. Music.app blips `paused` between tracks, so clearing instantly would flicker the status between every song. Lower it for a snappier hide. |
-| `pauseClearDelayMs` | `null` | How long a *pause* waits, as opposed to a stop. `null` asks the source: `clearDelayMs` for Music.app, whose pause is ambiguous between tracks, and 1.5s for the web player, whose pause is not. |
+| `pauseClearDelayMs` | `null` | How long a *pause* waits, as opposed to a stop. `null` asks the source: `clearDelayMs` for the desktop apps, whose pause is ambiguous between tracks, and 1.5s for the web player, whose pause is not. |
 | `hosting.mode` | `"webhook"` | `webhook` (Discord-hosted, capped) or `command` (your own storage, uncapped). |
 | `hosting.webhookUrl` | — | Discord webhook URL, for `webhook` mode. |
 | `hosting.command` | — | Uploader command with `{file}` / `{name}`, for `command` mode. Must print the public URL. |
@@ -459,10 +530,10 @@ Cache and encoded artwork go beside it on macOS, and under
 | `animatedArtwork.quality` | `75` | WebP quality, when `format` is `webp`. |
 | `animatedArtwork.maxBytes` | `9437184` | Encode ceiling. `null` disables the check. |
 | `animatedArtwork.onOversize` | `"degrade"` | `degrade` refits to fit; `skip` falls back to static art rather than compromise. |
-| `animatedArtwork.hardware.mode` | `"off"` | GPU encoding: `off` and `auto` both use the CPU; `vaapi` forces the GPU. See [Hardware encoding](#hardware-encoding-and-why-it-is-off). |
-| `animatedArtwork.hardware.device` | `"auto"` | `auto` \| `amd` \| `intel` \| `nvidia` \| a `/dev/dri/renderD*` path. Chosen by vendor, not by number. |
-| `animatedArtwork.hardware.decode` | `false` | Hardware decode, independent of `mode`. Measured slower than software. |
-| `animatedArtwork.hardware.globalQuality` | `null` | Override the CRF → VAAPI `global_quality` conversion. |
+| `animatedArtwork.hardware.mode` | `"auto"` | GPU encoding: `auto` uses AMD's AMF encoder on Windows and the CPU elsewhere; `off` always uses the CPU; `amf` and `vaapi` force a specific one. See [Hardware encoding](#hardware-encoding-and-which-gpu-path-actually-works). |
+| `animatedArtwork.hardware.device` | `"auto"` | `auto` \| `amd` \| `intel` \| `nvidia` \| a `/dev/dri/renderD*` path. VAAPI only, chosen by vendor rather than by number. AMF enumerates only AMD devices and ignores this. |
+| `animatedArtwork.hardware.decode` | `false` | Hardware decode, independent of `mode`. Measured slower than software nearly everywhere. |
+| `animatedArtwork.hardware.globalQuality` | `null` | Override the CRF → quantizer conversion (VAAPI `global_quality`, AMF `qp`). |
 | `uploadLocalArtwork` | `true` | For local library files with no catalog entry, upload their embedded cover through the same host. |
 | `logLevel` | `"info"` | `error` \| `warn` \| `info` \| `debug` |
 
@@ -474,9 +545,11 @@ Environment overrides: `YANPRESENCE_CLIENT_ID`, `YANPRESENCE_STOREFRONT`,
 ```bash
 node bin/yanpresence.js              # run
 node bin/yanpresence.js --doctor     # check the setup
-node bin/yanpresence.js --watch      # print Music.app state, ignore Discord
+node bin/yanpresence.js --watch      # print playback state, ignore Discord
 node bin/yanpresence.js --dry-run    # full pipeline, print the payload instead of sending
 node bin/yanpresence.js --verbose    # debug logging
+node bin/yanpresence.js --smtc       # Windows: dump the raw media sessions
+node bin/yanpresence.js --tray       # Windows: run with a notification-area icon
 ```
 
 `--dry-run` needs no `clientId` and is the fastest way to see exactly what
@@ -484,9 +557,14 @@ Discord would be told.
 
 ## Apple TV
 
-TV.app descends from the same iTunes scripting dictionary as Music.app — it
-answers `player state`, `player position` and `current track` the same way — so
-watching it costs one more resident `osascript` and nothing else. Turn it on:
+Available on macOS and Windows, and not through a browser — see
+[Apple TV on Windows](#apple-tv-on-windows) for how the Windows side differs.
+
+On macOS, TV.app descends from the same iTunes scripting dictionary as Music.app
+— it answers `player state`, `player position` and `current track` the same way
+— so watching it costs one more resident `osascript` and nothing else. On
+Windows it is a second media session, read by the watcher that is running
+anyway, so it costs nothing at all. Turn it on:
 
 ```json
 "tv": { "enabled": true }
@@ -565,6 +643,133 @@ each cached for 30 days. A film costs one search and one metadata call.
 iTunes Store. A purchased or rented film returns no match and keeps the
 `placeholderImageKey` fallback. Matching requires a title hit, so a near-miss
 yields no artwork rather than the wrong artwork.
+
+## Windows
+
+Apple ships Apple Music and Apple TV as packaged Store apps with **no
+automation surface at all** — there is no Windows equivalent of the iTunes
+scripting dictionary, and nothing to send an Apple Event to. What they do
+publish is a **System Media Transport Controls session** each: the record
+behind the flyout that appears over the volume overlay, and behind the
+play/pause key on your keyboard.
+
+That record carries everything the presence card is built from — title, artist,
+album, album artist, playback status, a timeline, and the cover art — and
+reading it injects nothing into either app and needs no permission. Sessions
+are identified by the publishing app's AUMID, which is how a session is known
+to be Apple Music rather than Spotify or a browser tab.
+
+```
+Apple Music app ─┐
+                 ├─► SMTC session ─► scripts/smtc-watch.ps1 ─► the same pipeline
+Apple TV app ────┘                    (one resident PowerShell)
+```
+
+One watcher process serves both apps. On macOS they are two applications to be
+scripted separately; here they are two entries in one list of sessions, so
+asking twice would mean two PowerShell hosts polling the same API.
+
+### Launching it from Windows Search
+
+```bash
+npm run install-windows
+```
+
+That writes one shortcut, per-user, no administrator needed:
+
+```
+%APPDATA%\Microsoft\Windows\Start Menu\Programs\yanpresence.lnk
+```
+
+Press **Start**, type `yanpresence`, press Enter. Add `-- -Startup` to the
+command above to also run it at login; `npm run uninstall-windows` removes both
+and leaves your config and caches alone.
+
+The shortcut does not point at `node.exe` directly. Node is a console
+application, so Windows would give it a console: a black window in your taskbar
+for as long as the presence is running, which you cannot close without killing
+the app. It points at [`windows/yanpresence-launch.ps1`](windows/yanpresence-launch.ps1)
+instead, which starts node hidden and exits.
+
+### The tray icon
+
+A hidden background process you cannot stop is not a thing to ship, so the
+launcher passes `--tray` and you get a notification-area icon:
+
+```
+  ┌─────────────────────────┐
+  │ yanpresence             │  ← greyed-out header
+  │ Listening to Be Her …   │  ← what the card currently says
+  │ ─────────────────────── │
+  │ Open log                │
+  │ Quit yanpresence        │
+  └─────────────────────────┘
+```
+
+**Quit** shuts the app down properly — it clears the presence with Discord on
+the way out rather than leaving a stale "Listening to…" behind. Hovering shows
+the same line as a tooltip; double-clicking pops it as a balloon.
+
+> **Windows 11 hides new tray icons by default.** Click the **^** arrow to the
+> left of the clock to find it, and drag it onto the taskbar to keep it in
+> view. This is Windows' behaviour for every new icon, not something the app
+> can opt out of.
+
+The icon lives in a PowerShell child running a WinForms message loop, because a
+message loop is not something Node can host. It watches its parent and exits if
+the app dies, so a crash cannot leave an orphan icon behind that quits nothing.
+
+Running from a terminal, you do not need any of this — Ctrl-C works, and the
+icon is off unless you ask for it with `--tray` or `windows.tray: true`.
+
+### Only one at a time
+
+Two copies would fight over one presence, each overwriting the other's activity
+every couple of seconds — easy to do by accident once there is a Start menu
+entry you can hit twice. A tray run claims a named pipe at startup and a second
+one refuses to start, saying so. Windows releases the pipe when the holder
+exits, however it exits, which a PID file could not promise.
+
+### Where things go
+
+| | |
+|---|---|
+| Config | `%APPDATA%\yanpresence\config.json` |
+| Caches | `%LOCALAPPDATA%\yanpresence\cache\` |
+| Log | `%LOCALAPPDATA%\yanpresence\cache\yanpresence.log` |
+
+The log exists because a hidden run has nowhere to print. It is opened *before*
+the config is validated, deliberately: a missing `clientId` is the likeliest
+reason a fresh install refuses to start, and that message would otherwise go to
+a console nobody has. A start-up failure in tray mode also raises a dialog box,
+since "nothing happened" is not an error message.
+
+### Apple TV on Windows
+
+Works, with one caveat worth knowing about. On macOS, TV.app answers `show`,
+`season number` and `episode number` as properties. A media session has no such
+fields — it has the same three free-text strings a music player publishes — so
+the show, the episode and its numbering are **read out of that text**:
+`S2E7`, `Season 2, Episode 7`, and `2x07` are all understood, wherever among
+the fields they appear, and the field that carried the numbering is cleaned up
+rather than shown with it trailing off the end.
+
+Which slot Apple puts what in is Apple's business and has moved before, so
+neither is assumed — the show is whichever field is not the numbering. To see
+both what arrived and what was made of it:
+
+```bash
+node bin/yanpresence.js --smtc
+```
+
+`--doctor` prints the same comparison when something is playing. If a future
+version of the app rearranges its fields, that is the one command that shows it
+rather than leaving you guessing at a wrong-looking card.
+
+Also unlike Apple Music, the Apple TV app registers **no session until it plays
+something** — an open, idle Apple TV app is indistinguishable from a closed
+one. That costs nothing but is why `--doctor` words its "not running" line the
+way it does.
 
 ## Linux and the web player
 
@@ -671,13 +876,22 @@ npm test
 
 Node's built-in runner, no dependencies. Covers the activity payload's
 constraints (the `status_display_type` mapping, length caps, the never-empty
-image slot), artwork cache invalidation, the watcher's watchdog, and the Linux
-path end to end: MPRIS parsing and classification against real captured
-`busctl` replies, the bridge's HTTP contract, the extension's own scripts run
-against stubbed browser APIs, and GPU device selection including the
+image slot), artwork cache invalidation, the watcher's watchdog, the Windows
+media session's normalizers — including reading a season and an episode out of
+the free text the Apple TV app publishes — and the Linux path end to end: MPRIS
+parsing and classification against real captured `busctl` replies, the bridge's
+HTTP contract, the extension's own scripts run against stubbed browser APIs,
+and GPU encoder selection on both the VAAPI and AMF paths, including the
 fall-back-to-CPU behaviour. Nothing touches Music.app, Discord, a GPU or the
 network, so it runs anywhere — though the watchdog cases wait on a real 5s
 interval, which puts the suite at ~20s.
+
+A handful of cases skip on Windows, and say so when they do. They stand in for
+a program the source shells out to (`busctl`, `ffmpeg`) by writing a
+`#!/usr/bin/env node` file and setting the execute bit; Windows has neither,
+and a `.cmd` shim cannot be spawned without `shell: true`, which the code under
+test rightly does not pass. Both programs are Linux-only concerns, so the
+coverage lost is coverage of code that cannot run there anyway.
 
 ## How it works
 
@@ -686,13 +900,19 @@ macOS:
 Music.app ──Apple Events──> scripts/music-watch.js  (resident osascript, JXA)
                                      │ JSON lines
                                      ▼
-                              src/music.js          normalize, watchdog, respawn
-                                     │
-Linux:                               │
-music.apple.com ──extension──> src/bridge.js   ────┤   loopback HTTP, reads MusicKit
-   in a browser  ──MPRIS─────> src/mpris.js    ────┤   busctl, identifies by page URL
+                              src/music.js     ────┐  normalize, watchdog, respawn
+                                                   │
+Windows:                                           │
+Apple Music ─┐                                     │
+             ├─media session─> scripts/smtc-watch.ps1  (resident PowerShell, WinRT)
+Apple TV ────┘                       │             │
+                              src/smtc.js      ────┤  normalize, split into channels
+                                                   │
+Linux:                                             │
+music.apple.com ──extension──> src/bridge.js   ────┤  loopback HTTP, reads MusicKit
+   in a browser  ──MPRIS─────> src/mpris.js    ────┤  busctl, identifies by page URL
                                      │             │
-                              src/sources.js  ─────┘   one snapshot shape either way
+                              src/sources.js  ─────┘  one snapshot shape either way
                                      ▼
                               src/index.js          track/seek/pause state machine
                                 ├──> src/catalog.js links + artwork URL + motion artwork
@@ -700,6 +920,7 @@ music.apple.com ──extension──> src/bridge.js   ────┤   loopbac
                                 └──> src/presence.js activity payload
                                              ▼
                                      src/discord.js  IPC framing over discord-ipc-N
+                                                     (a named pipe on Windows)
 ```
 
 A few decisions worth calling out:
@@ -708,7 +929,10 @@ A few decisions worth calling out:
   costs ~15ms of process churn every tick, and a long-lived script keeps the
   Apple Event connection to Music.app warm. A watchdog restarts it if it goes
   quiet — Music.app can block on an Apple Event during an iCloud library
-  refresh, which stalls the script without killing it.
+  refresh, which stalls the script without killing it. The Windows watcher is
+  the same idea and shares the same supervisor: a long-lived PowerShell host
+  is far too expensive to spawn per tick, and the process lifecycle, the line
+  framing and the watchdog are identical whatever is on the far end.
 - **Catalog metadata comes from `amp-api`**, the backend music.apple.com's own
   web player uses, authenticated with the anonymous token from its JS bundle.
   That's the only route to `editorialVideo` (motion artwork) — the public
@@ -727,9 +951,14 @@ A few decisions worth calling out:
   The one thing that genuinely differs is identification: an Apple Event can
   only have come from Music.app, while a browser tab has to prove which site it
   is — see [Linux and the web player](#linux-and-the-web-player).
-- **GPU work is verified, not assumed** — and then measured, which is how the
-  hardware AV1 encoder turned out to produce files Discord cannot render at all.
-  It is off by default for that reason, not for a theoretical one.
+- **The Windows apps are read without being touched.** They are packaged Store
+  apps with no automation surface, so there is nothing to script even if we
+  wanted to. The media session they publish is the same record the volume
+  flyout and your keyboard's play key already use.
+- **GPU work is verified, not assumed** — and then measured, which is how VAAPI
+  turned out to produce files Discord cannot render at all while AMF, on the
+  same silicon, produces files it renders fine. Both facts came from checking,
+  and `"auto"` differs by platform because of them.
 
 ## Troubleshooting
 
@@ -740,6 +969,28 @@ some views — check your profile popout, or ask someone else. Also confirm
 **`--doctor` says no response from the watcher.** macOS is blocking automation.
 *System Settings → Privacy & Security → Automation* → allow your terminal (or
 `node`) to control Music.
+
+**Windows: `--doctor` says Apple Music is not running when it is.** The app
+registers its media session when it launches, so this means the session is not
+being seen rather than not existing. Run `node bin/yanpresence.js --smtc` to
+list what *is* published — if Apple Music appears there under a different
+identifier than `AppleInc.AppleMusicWin`, put that prefix in
+`windows.appIds.music`.
+
+**Windows: the Start menu shortcut does nothing.** It runs hidden, so a failure
+to start is invisible by design. Look at
+`%LOCALAPPDATA%\yanpresence\cache\yanpresence.log`, which is written before
+the config is even validated. A start-up failure also raises a dialog box; if
+you got neither, node itself was not found — the launcher checks `PATH` and the
+usual install locations, and says so in a message box when it comes up empty.
+
+**Windows: I cannot find the tray icon.** Windows 11 hides new notification-area
+icons behind the **^** arrow next to the clock. Click it, then drag the icon
+onto the taskbar to keep it visible.
+
+**Windows: "yanpresence is already running".** A tray run claims a named pipe so
+two copies cannot fight over one presence. Quit the first from its tray icon —
+or, if it is orphaned, `Get-Process node | Stop-Process`.
 
 **The status line shows "Listening to Apple Music" instead of the song.** That
 means your Discord build isn't honouring `status_display_type`. It's part of the
@@ -769,7 +1020,14 @@ so looking is the only way to tell.
 **No album art at all.** Check `--dry-run` output for `large_image`. If the
 track is a local file that isn't in Apple's catalog, artwork needs
 `hosting.webhookUrl` (or `hosting.command`) set so its embedded cover can be
-hosted.
+hosted. On Windows that cover comes from the thumbnail the app hands the media
+session, which is the only place Windows will show it to us.
+
+**Windows: the Apple TV card shows the wrong show, or the numbering is missing.**
+The season and episode are read out of free text there rather than from
+properties — see [Apple TV on Windows](#apple-tv-on-windows). Run
+`node bin/yanpresence.js --smtc` while it is playing: it prints the raw fields
+next to what was made of them, which turns a guess into a diff.
 
 **Animated art never shows.** Most albums simply don't have motion artwork.
 Run with `--verbose`: you'll see `Hosted animated artwork for …` when one does.

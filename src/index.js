@@ -62,6 +62,11 @@ export class YanPresence {
     this.clearTimer = null;
     this.hideTimer = null;
     this.pendingActivity = undefined;
+
+    // Optional. Called with a one-line description of what is on the card, or
+    // '' when nothing is. Set by the tray icon, which has a tooltip and a menu
+    // line to keep current; nothing else observes it.
+    this.onStatus = null;
   }
 
   start() {
@@ -487,6 +492,11 @@ export class YanPresence {
    * scrubbing user can otherwise generate a burst of updates.
    */
   queue(activity) {
+    // Deliberately here rather than in flush(): this is what the app has
+    // decided to show, and the tray should say so without waiting out the
+    // rate limiter that only Discord needs.
+    this.report(activity);
+
     const json = JSON.stringify(activity);
     if (json === this.lastSentJson) {
       // Discord is already showing exactly this. Drop anything still queued --
@@ -505,6 +515,23 @@ export class YanPresence {
       this.flush();
     }, wait);
     this.flushTimer.unref?.();
+  }
+
+  /**
+   * Tells whoever is listening what the card now says, in one line.
+   *
+   * Built from the activity rather than from the snapshot so that it cannot
+   * drift from what Discord is being shown -- including the cases where they
+   * are deliberately different, like a pause that has hidden the presence.
+   */
+  report(activity) {
+    if (!this.onStatus) return;
+    if (!activity) {
+      this.onStatus('');
+      return;
+    }
+    const verb = activity.type === 3 ? 'Watching' : 'Listening to';
+    this.onStatus(`${verb} ${[activity.details, activity.state].filter(Boolean).join(' — ')}`);
   }
 
   /**

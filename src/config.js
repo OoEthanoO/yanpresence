@@ -7,23 +7,38 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export const PROJECT_ROOT = path.resolve(__dirname, '..');
 
+// Three platforms, three opinions about where an application's files live.
 // macOS keeps app data in one place; Linux splits it, and putting a cache under
-// ~/.config is the kind of thing that gets it backed up forever.
-export const SUPPORT_DIR =
-  process.platform === 'darwin'
-    ? path.join(os.homedir(), 'Library', 'Application Support', 'yanpresence')
-    : path.join(
-        process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'),
-        'yanpresence'
-      );
+// ~/.config is the kind of thing that gets it backed up forever; Windows draws
+// the same line between Roaming (config, follows you to another machine) and
+// Local (cache, emphatically should not).
+function supportDir() {
+  if (process.platform === 'darwin') {
+    return path.join(os.homedir(), 'Library', 'Application Support', 'yanpresence');
+  }
+  if (process.platform === 'win32') {
+    return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'yanpresence');
+  }
+  return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'yanpresence');
+}
 
-export const CACHE_DIR =
-  process.platform === 'darwin'
-    ? path.join(SUPPORT_DIR, 'cache')
-    : path.join(
-        process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'),
-        'yanpresence'
-      );
+function cacheDir() {
+  if (process.platform === 'darwin') return path.join(supportDir(), 'cache');
+  if (process.platform === 'win32') {
+    return path.join(
+      process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'),
+      'yanpresence',
+      'cache'
+    );
+  }
+  return path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'yanpresence');
+}
+
+export const SUPPORT_DIR = supportDir();
+export const CACHE_DIR = cacheDir();
+
+/** Where a hidden, Start-menu-launched run writes what it would have printed. */
+export const LOG_FILE = path.join(CACHE_DIR, 'yanpresence.log');
 
 export const DEFAULTS = {
   // Discord application ID (Developer Portal -> your app -> Application ID).
@@ -41,14 +56,17 @@ export const DEFAULTS = {
 
   // Where playback state comes from.
   //
-  //   "auto"       -- pick by platform: Music.app/TV.app on macOS, the browser
-  //                   sources on Linux. Whatever is actually playing wins.
-  //   "apple-apps" -- Music.app and TV.app over Apple Events (macOS only).
+  //   "auto"       -- pick by platform: the Apple apps on macOS and Windows,
+  //                   the browser sources on Linux, where there is no Apple
+  //                   app to read. Whatever is actually playing wins.
+  //   "apple-apps" -- the Apple apps themselves. Music.app and TV.app over
+  //                   Apple Events on macOS; the Apple Music and Apple TV
+  //                   Store apps over the Windows media session on Windows.
   //   "browser"    -- the Apple Music web player at music.apple.com, read
   //                   over the extension bridge and/or MPRIS. Audio only:
-  //                   Apple TV is a TV.app source, so `tv` below is inert.
+  //                   Apple TV is an app source, so `tv` below is inert.
   //
-  // "browser" works on Linux and on macOS: if you play in a browser there too,
+  // "browser" works everywhere: if you play in a browser on a Mac or a PC too,
   // set it explicitly.
   source: 'auto',
 
@@ -146,11 +164,31 @@ export const DEFAULTS = {
   // the artist.
   statusDisplay: 'details',
 
-  // Apple TV, through TV.app on macOS. TV.app is scripted through the same
-  // iTunes-descended dictionary as Music.app, so watching it costs one more
-  // resident osascript and nothing else. Only one source holds the presence at
-  // a time; whatever is actually playing wins, and video beats audio when both
-  // are. Ignored when `source` resolves to "browser".
+  // Windows-only knobs. Inert everywhere else.
+  windows: {
+    // Show a notification-area icon, whose only menu item that does anything
+    // is Quit. Off by default, because a run from a terminal has Ctrl-C and
+    // does not need one -- the Start menu shortcut written by
+    // `npm run install-windows` passes --tray, since a hidden background
+    // process with no way to stop it is not a thing to ship.
+    tray: false,
+
+    // Which apps to read. Prefixes of the AUMID each publishes its media
+    // session under; only override these if Apple ships the apps under a
+    // different package identity than the ones in the Store today.
+    appIds: {
+      music: 'AppleInc.AppleMusicWin',
+      tv: 'AppleInc.AppleTVWin',
+    },
+  },
+
+  // Apple TV, through TV.app on macOS and the Apple TV app on Windows. On
+  // macOS TV.app is scripted through the same iTunes-descended dictionary as
+  // Music.app, so watching it costs one more resident osascript and nothing
+  // else; on Windows it is a second media session read by the watcher that is
+  // running anyway, so it costs nothing at all. Only one source holds the
+  // presence at a time; whatever is actually playing wins, and video beats
+  // audio when both are. Ignored when `source` resolves to "browser".
   tv: {
     enabled: false,
 
@@ -306,34 +344,49 @@ export const DEFAULTS = {
     ffprobePath: 'ffprobe',
     img2webpPath: 'img2webp',
 
-    // GPU encoding. Off, and not for want of trying -- see src/gpu.js for the
-    // measurements. Short version: the AMD VAAPI AV1 encoder produces AVIF
-    // that ffmpeg reads back happily and Chromium refuses to decode, and
-    // Discord is Electron, so the card renders the grey "?" placeholder. Every
-    // variant failed, down to a single still frame. It also saved about a
-    // second on a job that runs once per album and is cached forever, and
-    // hardware *decode* measured slower than software on both GPUs.
+    // GPU encoding -- see src/gpu.js for the measurements behind every word of
+    // this. Short version: which API you go through decides whether it works.
     //
-    // mode: "off" (default, CPU) | "auto" (also the CPU -- see above) |
-    //       "vaapi" (force the GPU: kept for other hardware, other drivers,
-    //       or a consumer that is not Chromium. Warns loudly when used.)
+    //   AMF (Windows, AMD)  Works. On a Radeon 780M, av1_amf produced 19.6MB
+    //                       in 5.7s against libsvtav1 crf20's 21.4MB in 6.5s,
+    //                       and Chromium 148 -- which is what Discord is --
+    //                       decodes the result.
+    //   VAAPI (Linux, AMD)  Does not. The same silicon through Mesa produces
+    //                       AVIF that ffmpeg reads back happily and Chromium
+    //                       refuses to decode, so the card renders the grey
+    //                       "?" placeholder. Every variant failed, down to a
+    //                       single still frame.
+    //
+    // mode: "auto" (default: AMF where an AMD adapter and av1_amf are both
+    //              present, the CPU everywhere else) |
+    //       "off"  (always the CPU) |
+    //       "amf"  (force AMD's encoder; warns if it cannot be used) |
+    //       "vaapi" (force the GPU on Linux: kept for other hardware, other
+    //              drivers, or a consumer that is not Chromium. Warns loudly.)
+    //
+    // Whatever is chosen is verified, not trusted: an encode that produces a
+    // file ffprobe cannot read falls back to the CPU for the rest of the run.
     hardware: {
-      mode: 'off',
+      mode: 'auto',
 
       // Which VAAPI device: "auto" | "amd" | "intel" | "nvidia" | an explicit
       // /dev/dri/renderD* path. "auto" prefers AMD, then Intel -- and picks by
       // vendor, not by number, because renderD128 is the discrete NVIDIA card
-      // on plenty of laptops and it has no VAAPI encoder at all.
+      // on plenty of laptops and it has no VAAPI encoder at all. Unused by
+      // AMF, which enumerates only AMD devices and so cannot pick wrong.
       device: 'auto',
 
       // Hardware decode, for every format including the CPU-encoded ones.
       // Independent of `mode`, which governs the encode only. Measured slower
-      // than software here (4.9s NVDEC / 3.9s VAAPI / 2.9s software on a 20.6s
-      // master), so it is opt-in too.
+      // than software nearly everywhere -- 4.9s NVDEC / 3.9s VAAPI / 2.9s
+      // software on Linux, and on Windows 7.5s against 5.7s when paired with
+      // the AMF encoder, because the frames have to come back to system memory
+      // for the scale filter and then go up again. Opt-in for that reason.
       decode: false,
 
-      // Override the CRF -> VAAPI global_quality conversion. null derives it
-      // from `crf` at the measured 3.5x that matches libsvtav1's output size.
+      // Override the CRF -> quantizer conversion (VAAPI's global_quality, or
+      // AMF's qp). null derives it from `crf` at the measured 3.5x that
+      // matches libsvtav1's output size.
       globalQuality: null,
     },
   },
@@ -418,19 +471,20 @@ export function validateConfig(config) {
   if (!['auto', 'apple-apps', 'browser'].includes(config.source)) {
     problems.push(`source must be one of auto|apple-apps|browser (got ${config.source})`);
   }
-  if (config.source === 'apple-apps' && process.platform !== 'darwin') {
+  if (config.source === 'apple-apps' && !['darwin', 'win32'].includes(process.platform)) {
     problems.push(
-      'source is "apple-apps", which drives Music.app over Apple Events and needs macOS. ' +
-        'Use "browser" to read music.apple.com and tv.apple.com instead.'
+      'source is "apple-apps", which reads the Apple Music and Apple TV desktop apps and so ' +
+        'needs macOS or Windows. Apple ships neither on Linux — use "browser" to read ' +
+        'music.apple.com instead.'
     );
   }
   const port = Number(config.browser?.bridge?.port);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     problems.push(`browser.bridge.port must be a port number (got ${config.browser?.bridge?.port})`);
   }
-  if (!['auto', 'off', 'vaapi'].includes(config.animatedArtwork.hardware?.mode ?? 'auto')) {
+  if (!['auto', 'off', 'vaapi', 'amf'].includes(config.animatedArtwork.hardware?.mode ?? 'auto')) {
     problems.push(
-      `animatedArtwork.hardware.mode must be auto|off|vaapi (got ${config.animatedArtwork.hardware.mode})`
+      `animatedArtwork.hardware.mode must be auto|off|vaapi|amf (got ${config.animatedArtwork.hardware.mode})`
     );
   }
   if (!['name', 'state', 'details'].includes(config.statusDisplay)) {

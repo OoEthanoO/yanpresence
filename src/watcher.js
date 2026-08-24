@@ -4,19 +4,33 @@ import { EventEmitter } from 'node:events';
 import log from './log.js';
 
 /**
- * Supervises a resident `osascript` watcher and emits `state` with a
+ * Supervises a resident line-oriented watcher process and emits `state` with a
  * normalized snapshot.
  *
- * Music.app and TV.app are scripted identically -- both descend from iTunes,
- * both answer `player state` / `player position` / `current track` -- so the
- * process lifecycle, the line framing and the watchdog are shared. Only the
- * script to run and the shape of the snapshot differ, and those are supplied
- * by the subclass.
+ * Three of them exist: Music.app and TV.app under `osascript` on macOS, and
+ * the Windows media session watcher under PowerShell. They have nothing in
+ * common at the far end and everything in common in the middle -- a long-lived
+ * child printing one JSON object per line, which has to be framed, parsed,
+ * restarted when it dies and noticed when it goes quiet. All of that lives
+ * here. The subclass supplies the command to run and the shape of the
+ * snapshot, and nothing else.
  */
 export class AppWatcher extends EventEmitter {
-  constructor({ script, label, normalize, pollIntervalMs = 1000, idlePollIntervalMs = 5000 }) {
+  constructor({
+    script,
+    label,
+    normalize,
+    pollIntervalMs = 1000,
+    idlePollIntervalMs = 5000,
+    command = '/usr/bin/osascript',
+    args = ['-l', 'JavaScript', script],
+    env = {},
+  }) {
     super();
     this.script = script;
+    this.command = command;
+    this.args = args;
+    this.extraEnv = env;
     this.label = label;
     this.normalize = normalize;
     this.pollIntervalMs = pollIntervalMs;
@@ -73,13 +87,18 @@ export class AppWatcher extends EventEmitter {
     this.buffer = '';
     this.lastLineAt = Date.now();
 
-    this.child = spawn('/usr/bin/osascript', ['-l', 'JavaScript', this.script], {
+    this.child = spawn(this.command, this.args, {
       env: {
         ...process.env,
         YP_POLL_MS: String(this.pollIntervalMs),
         YP_IDLE_POLL_MS: String(this.idlePollIntervalMs),
+        ...this.extraEnv,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
+      // The watcher is a console process; without this it flashes a window
+      // every time it is spawned or restarted, which for the Windows source is
+      // once a second in the worst case.
+      windowsHide: true,
     });
 
     this.child.stdout.setEncoding('utf8');

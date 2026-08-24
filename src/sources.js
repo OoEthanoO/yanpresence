@@ -6,6 +6,7 @@ import path from 'node:path';
 import { BridgeSource } from './bridge.js';
 import { MprisSource } from './mpris.js';
 import { MusicWatcher, dumpCurrentArtwork, isCatalogTrack } from './music.js';
+import { SmtcWatcher, dumpCurrentArtwork as dumpSmtcArtwork } from './smtc.js';
 import { TvWatcher } from './tv.js';
 import log from './log.js';
 
@@ -19,22 +20,30 @@ const MPRIS_WARN_GRACE_MS = 30_000;
  * Two implementations, one shape: each exposes a `music` and a `tv` channel
  * that emit `state` with the snapshot the rest of the program understands.
  *
- *   apple-apps  Music.app and TV.app over Apple Events (macOS).
+ *   apple-apps  The Apple apps themselves -- Music.app and TV.app over Apple
+ *               Events on macOS, the Apple Music and Apple TV Store apps over
+ *               the Windows media session on Windows.
  *   browser     music.apple.com, read over the companion extension's loopback
  *               bridge and/or MPRIS (Linux, and macOS if that is where you
  *               play). Audio only -- see WebSources.
  */
 export function createSources(config) {
-  const wanted = resolveSourceKind(config);
-  return wanted === 'apple-apps' ? new AppleAppSources(config) : new WebSources(config);
+  if (resolveSourceKind(config) !== 'apple-apps') return new WebSources(config);
+  return process.platform === 'win32' ? new WindowsAppSources(config) : new AppleAppSources(config);
+}
+
+/** Platforms where Apple ships desktop apps we can read playback out of. */
+export function hasAppleApps() {
+  return process.platform === 'darwin' || process.platform === 'win32';
 }
 
 export function resolveSourceKind(config) {
   const requested = String(config.source ?? 'auto').toLowerCase();
   if (requested === 'apple-apps' || requested === 'browser') return requested;
-  // "auto": the Apple apps exist on macOS only, so everywhere else the browser
-  // is not a fallback, it is the only place Apple Music runs at all.
-  return process.platform === 'darwin' ? 'apple-apps' : 'browser';
+  // "auto": Apple ships desktop apps on macOS and Windows, and those are the
+  // best source on both. On Linux there is no Apple app at all, so the browser
+  // is not a fallback -- it is the only place Apple Music runs.
+  return hasAppleApps() ? 'apple-apps' : 'browser';
 }
 
 /** A `state`-emitting facade with the AppWatcher lifecycle the app expects. */
@@ -94,6 +103,98 @@ class AppleAppSources {
   async localArtworkFor(track) {
     if (!track.hasArtwork || isCatalogTrack(track)) return null;
     return dumpCurrentArtwork();
+  }
+}
+
+/* ------------------------------------------------------------------ */
+
+/**
+ * The Apple Music and Apple TV apps on Windows, over the media session.
+ *
+ * Apple ships both as packaged Store apps with no automation surface -- there
+ * is no Windows equivalent of the iTunes scripting dictionary, and nothing to
+ * send an Apple Event to. What they do publish is a System Media Transport
+ * Controls session each: the record behind the flyout that appears over the
+ * volume overlay, carrying title, artist, album, playback status and a
+ * timeline. That is every field the presence card is built from, and it is
+ * read without injecting anything into either app.
+ *
+ * One watcher process serves both apps, because on Windows they are two
+ * entries in one list of sessions rather than two applications to be scripted
+ * separately. It is split back into channels here, so that everything
+ * downstream sees the same two independent sources macOS presents.
+ */
+class WindowsAppSources {
+  constructor(config) {
+    this.kind = 'apple-apps';
+    this.config = config;
+
+    this.tvEnabled = Boolean(config.tv?.enabled);
+    this.watcher = new SmtcWatcher({
+      pollIntervalMs: config.pollIntervalMs,
+      idlePollIntervalMs: config.idlePollIntervalMs,
+      tv: this.tvEnabled,
+      appIds: config.windows?.appIds ?? {},
+    });
+
+    this.started = 0;
+    this.music = new Channel(
+      () => this.begin(),
+      () => this.end()
+    );
+    this.tv = this.tvEnabled
+      ? new Channel(
+          () => this.begin(),
+          () => this.end()
+        )
+      : null;
+
+    this.watcher.on('state', (snapshot) => {
+      const channel = snapshot.channel === 'tv' ? this.tv : this.music;
+      channel?.emit('state', snapshot);
+    });
+  }
+
+  describe() {
+    return this.tv
+      ? 'Watching the Apple Music and Apple TV apps over the Windows media session'
+      : 'Watching the Apple Music app over the Windows media session';
+  }
+
+  idleMessage(state) {
+    return `Apple Music is ${state}`;
+  }
+
+  /**
+   * The apps report `stopped` for a beat between tracks, exactly as Music.app
+   * blips `paused`, so a pause here needs the same holding period to tell one
+   * from the other.
+   */
+  pauseDelayMs(config) {
+    return config.pauseClearDelayMs ?? config.clearDelayMs;
+  }
+
+  /**
+   * The cover the app handed the media flyout.
+   *
+   * Unlike macOS there is no catalog-vs-local distinction to make first: the
+   * media session publishes a thumbnail for both, and this is only ever
+   * reached once the catalog lookup has already come up empty -- which is
+   * precisely the imported-file case the thumbnail is wanted for.
+   */
+  async localArtworkFor(track) {
+    if (!track.hasArtwork) return null;
+    return dumpSmtcArtwork({ appId: track.origin });
+  }
+
+  begin() {
+    if (this.started++ > 0) return;
+    this.watcher.start();
+  }
+
+  end() {
+    if (--this.started > 0) return;
+    this.watcher.stop();
   }
 }
 

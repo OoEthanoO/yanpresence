@@ -1,23 +1,25 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import process from 'node:process';
 
 import { AppleCatalog } from '../src/catalog.js';
 import { ArtworkHost, installHint } from '../src/artwork.js';
-import { CACHE_DIR, PROJECT_ROOT, SUPPORT_DIR, configPaths, loadConfig, validateConfig } from '../src/config.js';
+import { CACHE_DIR, LOG_FILE, PROJECT_ROOT, SUPPORT_DIR, configPaths, loadConfig, validateConfig } from '../src/config.js';
 import { DiscordRPC } from '../src/discord.js';
-import { createSources, resolveSourceKind } from '../src/sources.js';
+import { createSources, hasAppleApps, resolveSourceKind } from '../src/sources.js';
 import { episodeCode } from '../src/tv.js';
 import { TvCatalog, tvArtworkAt } from '../src/tvcatalog.js';
 import { YanPresence } from '../src/index.js';
-import log, { setLevel } from '../src/log.js';
+import log, { setLevel, setLogFile } from '../src/log.js';
 
 const USAGE = `
 yanpresence — Apple Music rich presence for Discord
 
-Reads Music.app and TV.app on macOS, and the Apple Music web player at
-music.apple.com on Linux. Pick explicitly with "source" in the config.
+Reads the Apple Music and Apple TV apps on macOS and Windows, and the Apple
+Music web player at music.apple.com on Linux. Pick explicitly with "source" in
+the config.
 
 Usage:
   yanpresence                 Start the presence daemon
@@ -30,13 +32,21 @@ Usage:
   yanpresence --clear-cache   Drop every cache: artwork, lookups and tokens
   yanpresence --test-assets   Cycle candidate large_image values through your
                               presence so you can see which ones Discord renders
+  yanpresence --smtc          Dump the raw Windows media sessions (Windows only)
   yanpresence --help
 
 Options:
+  --tray                      Show a notification-area icon with a Quit item.
+                              Windows only; what the Start menu shortcut passes
+  --log-file [path]           Also write the log to a file. Defaults to
+                              ${LOG_FILE}
   --verbose                   Shorthand for --log-level debug
   --log-level <level>         error | warn | info | debug
   --config <path>             Use a specific config file
 `;
+
+// Nothing listens on it; holding it open is the whole signal.
+const SINGLE_INSTANCE_PIPE = '\\\\.\\pipe\\yanpresence-single';
 
 function parseArgs(argv) {
   const flags = { logLevel: null };
@@ -68,6 +78,18 @@ function parseArgs(argv) {
       case '--test-assets':
         flags.testAssets = true;
         break;
+      case '--smtc':
+        flags.smtc = true;
+        break;
+      case '--tray':
+        flags.tray = true;
+        break;
+      case '--log-file':
+        // The path is optional: bare --tray runs want the default, and asking
+        // people to repeat it would be asking for a typo.
+        if (argv[i + 1] && !argv[i + 1].startsWith('--')) flags.logFile = argv[++i];
+        else flags.logFile = LOG_FILE;
+        break;
       case '--verbose':
       case '-v':
         flags.logLevel = 'debug';
@@ -88,15 +110,16 @@ function parseArgs(argv) {
 }
 
 /**
- * Music.app and TV.app are scripted over Apple Events, which exist on macOS and
- * nowhere else. The web players have no such constraint, so everything except
- * that one source runs anywhere.
+ * Apple ships desktop apps on macOS and Windows and not on Linux, so that is
+ * where the "apple-apps" source can run. The web players have no such
+ * constraint and run anywhere.
  */
 function requirePlatform(config) {
-  if (resolveSourceKind(config) === 'apple-apps' && process.platform !== 'darwin') {
+  if (resolveSourceKind(config) === 'apple-apps' && !hasAppleApps()) {
     console.error(
-      'source is "apple-apps", which drives Music.app over Apple Events and needs macOS.\n' +
-        'Set "source" to "browser" to read music.apple.com and tv.apple.com instead.'
+      'source is "apple-apps", which reads the Apple Music and Apple TV desktop apps and so\n' +
+        'needs macOS or Windows. Apple ships neither on Linux — set "source" to "browser" to\n' +
+        'read music.apple.com instead.'
     );
     process.exit(1);
   }
@@ -445,6 +468,104 @@ async function doctorTvArtwork(config, tv, rows) {
 }
 
 /**
+ * The Apple Music and Apple TV apps on Windows, over the media session.
+ *
+ * The failure modes here are entirely different from macOS's. There is no
+ * automation permission to be granted and no prompt to be stuck behind; what
+ * can go wrong is that Windows PowerShell is not where it should be, that the
+ * WinRT projection does not load, or that an app is installed under a package
+ * identity these AUMIDs do not match. Each is silent on its own, so each gets
+ * asked about.
+ */
+async function doctorWindowsApps(config, rows) {
+  const ok = (label, detail) => rows.push(['ok', label, detail]);
+  const warn = (label, detail) => rows.push(['warn', label, detail]);
+  const bad = (label, detail) => rows.push(['fail', label, detail]);
+
+  const { POWERSHELL } = await import('../src/win.js');
+  const { APPLE_MUSIC_APP_ID, APPLE_TV_APP_ID, readSessionsOnce } = await import('../src/smtc.js');
+
+  if (!fs.existsSync(POWERSHELL)) {
+    bad(
+      'PowerShell',
+      `not found at ${POWERSHELL}. The media session is read through Windows PowerShell 5.1,\n` +
+        '      which ships with Windows — set YANPRESENCE_POWERSHELL if yours lives elsewhere.\n' +
+        '      Note this is not PowerShell 7: pwsh cannot project the WinRT types involved.'
+    );
+    return;
+  }
+  ok('PowerShell', POWERSHELL);
+
+  const appIds = {
+    music: config.windows?.appIds?.music || APPLE_MUSIC_APP_ID,
+    tv: config.windows?.appIds?.tv || APPLE_TV_APP_ID,
+  };
+
+  let sessions;
+  try {
+    sessions = await readSessionsOnce({ appIds });
+  } catch (err) {
+    bad('media session', `could not read the Windows media sessions: ${err.message}`);
+    return;
+  }
+
+  const failed = sessions.find((s) => s.state === 'error');
+  if (failed) {
+    bad('media session', `the watcher reported: ${failed.error}`);
+    return;
+  }
+
+  const music = sessions.find((s) => s.channel === 'music');
+  const tv = sessions.find((s) => s.channel === 'tv');
+
+  const report = (label, reading, appId, hint) => {
+    if (!reading || reading.state === 'closed') {
+      warn(
+        label,
+        `not running (that is fine — start it and presence will follow).\n` +
+          `      Looking for a media session from ${appId}.${hint ? `\n      ${hint}` : ''}`
+      );
+    } else if (reading.state === 'playing' || reading.state === 'paused') {
+      ok(label, `${reading.state}: ${[reading.name, reading.artist].filter(Boolean).join(' — ')}`);
+    } else {
+      ok(label, `running, nothing loaded (player state "${reading.state}")`);
+    }
+  };
+
+  report('Apple Music', music, appIds.music);
+  if (!config.tv?.enabled) {
+    rows.push(['info', 'Apple TV', 'disabled in config (set tv.enabled to true)']);
+    return;
+  }
+  report(
+    'Apple TV',
+    tv,
+    appIds.tv,
+    'The app registers one only once something is playing, unlike Apple Music.'
+  );
+
+  const { normalizeTv } = await import('../src/smtc.js');
+  const snapshot = tv ? normalizeTv(tv) : null;
+
+  if (snapshot?.active) {
+    // On macOS the show, the season and the episode are properties TV.app
+    // answers. Here they are read out of whatever free text the app happened
+    // to publish (see parseEpisode), so both sides of that reading are shown:
+    // getting it wrong is otherwise indistinguishable from getting it right.
+    rows.push([
+      'info',
+      'Apple TV fields',
+      `title="${tv.name}" artist="${tv.artist}" album="${tv.album}" subtitle="${tv.subtitle ?? ''}"\n` +
+        `      → show="${snapshot.item.show}" episode="${snapshot.item.name}" ` +
+        `${episodeCode(snapshot.item) || '(no numbering)'}`,
+    ]);
+  }
+
+  await doctorTvArtwork(config, snapshot, rows);
+  doctorTvHeader(config, rows);
+}
+
+/**
  * The web players: the extension bridge and MPRIS, checked separately because
  * they fail separately and for different reasons.
  */
@@ -580,7 +701,9 @@ async function cmdDoctor(config) {
     'source',
     resolveSourceKind(config) === 'browser'
       ? 'browser — music.apple.com and tv.apple.com'
-      : 'apple-apps — Music.app and TV.app'
+      : process.platform === 'win32'
+        ? 'apple-apps — the Apple Music and Apple TV apps, over the Windows media session'
+        : 'apple-apps — Music.app and TV.app'
   );
 
   rows.push(['info', 'config', config.__source ?? `none found (using defaults)`]);
@@ -593,19 +716,17 @@ async function cmdDoctor(config) {
   else ok('clientId', String(config.clientId));
 
   // --- playback source -------------------------------------------------
-  if (resolveSourceKind(config) === 'apple-apps') await doctorAppleApps(config, rows);
-  else await doctorBrowser(config, rows);
+  if (resolveSourceKind(config) !== 'apple-apps') await doctorBrowser(config, rows);
+  else if (process.platform === 'win32') await doctorWindowsApps(config, rows);
+  else await doctorAppleApps(config, rows);
 
   // --- Discord ---------------------------------------------------------
-  const sockets = DiscordRPC.candidateSockets().filter((p) => {
-    try {
-      return fs.statSync(p).isSocket();
-    } catch {
-      return false;
-    }
-  });
-  if (!sockets.length) bad('Discord', 'no IPC socket found — is the Discord desktop app running?');
-  else ok('Discord', `IPC socket at ${sockets[0]}`);
+  const sockets = DiscordRPC.existingSockets();
+  if (!sockets.length) {
+    bad('Discord', 'no IPC socket found — is the Discord desktop app running?');
+  } else {
+    ok('Discord', `${process.platform === 'win32' ? 'IPC pipe' : 'IPC socket'} at ${sockets[0]}`);
+  }
 
   if (sockets.length && !problems.length) {
     const rpc = new DiscordRPC({ clientId: config.clientId });
@@ -765,6 +886,127 @@ async function cmdDoctor(config) {
   process.exit(failed ? 1 : 0);
 }
 
+/**
+ * Every Apple media session Windows currently knows about, raw.
+ *
+ * The Apple TV app publishes a show, an episode and its numbering as three
+ * free-text SMTC fields rather than as properties, and which field carries
+ * what is Apple's business, not a documented contract. This prints what
+ * arrived so the mapping can be checked against reality -- and so a mapping
+ * that stops matching a future version of the app can be diagnosed in one
+ * command rather than guessed at.
+ */
+async function cmdSmtc(config) {
+  if (process.platform !== 'win32') {
+    console.error('--smtc reads the Windows media session and only works on Windows.');
+    process.exit(1);
+  }
+
+  const { APPLE_MUSIC_APP_ID, APPLE_TV_APP_ID, readSessionsOnce, normalizeMusic, normalizeTv } =
+    await import('../src/smtc.js');
+
+  const appIds = {
+    music: config.windows?.appIds?.music || APPLE_MUSIC_APP_ID,
+    tv: config.windows?.appIds?.tv || APPLE_TV_APP_ID,
+  };
+
+  const indent = (value) => JSON.stringify(value, null, 2).replaceAll('\n', '\n      ');
+
+  console.log('\n  Looking for media sessions from:');
+  console.log(`    music  ${appIds.music}`);
+  console.log(`    tv     ${appIds.tv}\n`);
+
+  const sessions = await readSessionsOnce({ appIds });
+  if (!sessions.length) {
+    console.log('  Nothing answered. Is Windows PowerShell where --doctor expects it?\n');
+    return;
+  }
+
+  for (const session of sessions) {
+    console.log(`  [${session.channel}] ${session.state}`);
+    if (session.state === 'closed') {
+      console.log('      no session — the app is not running\n');
+      continue;
+    }
+    if (session.state === 'error') {
+      console.log(`      ${session.error}\n`);
+      continue;
+    }
+
+    console.log(`      ${indent(session)}`);
+
+    // Both halves, because the raw fields are only interesting next to what
+    // was made of them.
+    const parsed = session.channel === 'tv' ? normalizeTv(session) : normalizeMusic(session);
+    if (parsed.active) console.log(`      → ${indent(parsed.item ?? parsed.track)}`);
+    console.log('');
+  }
+}
+
+/**
+ * Refuses to start a second copy.
+ *
+ * Two daemons would fight over one presence, each overwriting the other's
+ * activity every couple of seconds. That was hard to do by accident when the
+ * only way in was a terminal; it is easy once there is a Start menu entry
+ * people can hit twice. A named pipe is the check because Windows releases it
+ * when the holder exits, however it exits -- a PID file would have to survive
+ * being wrong after a crash, and would not.
+ */
+/**
+ * Puts a message where someone with no console can read it.
+ *
+ * Only ever used for a failure that stops the app starting at all -- the tray
+ * icon covers everything after that, and a dialog box for anything routine
+ * would be worse than the silence it replaces.
+ */
+async function showFatalDialog(message, logFile) {
+  if (process.platform !== 'win32') return;
+  try {
+    const { POWERSHELL } = await import('../src/win.js');
+    const body = [message, logFile ? `\n\nThe full log is at:\n${logFile}` : ''].join('');
+    const { execFile } = await import('node:child_process');
+    await new Promise((resolve) => {
+      const child = execFile(
+        POWERSHELL,
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-STA',
+          '-Command',
+          'Add-Type -AssemblyName System.Windows.Forms;' +
+            '[System.Windows.Forms.MessageBox]::Show(' +
+            '[Console]::In.ReadToEnd(), "yanpresence", "OK", "Error") | Out-Null',
+        ],
+        { windowsHide: true, timeout: 120000 },
+        () => resolve()
+      );
+      // Through stdin rather than the command line: the message contains
+      // newlines and quotes, and quoting it into a -Command string is a
+      // reliable way to produce a different error than the one being reported.
+      child.stdin.end(body, 'utf8');
+    });
+  } catch {
+    /* the dialog is a courtesy; the log file is the record */
+  }
+}
+
+function claimSingleInstance() {
+  if (process.platform !== 'win32') return null;
+
+  const server = net.createServer();
+  server.on('error', () => {
+    console.error(
+      'yanpresence is already running. Quit it from the notification-area icon first,\n' +
+        'or end the existing node process, then start this one.'
+    );
+    process.exit(1);
+  });
+  server.listen(SINGLE_INSTANCE_PIPE);
+  server.unref();
+  return server;
+}
+
 async function cmdWatch(config) {
   // TV is normally opt-in, but --watch is a diagnostic: on macOS, showing both
   // sources is the point of running it. The browser source has no TV channel.
@@ -823,31 +1065,73 @@ async function main() {
   requirePlatform(config);
 
   if (flags.doctor) return cmdDoctor(config);
+  if (flags.smtc) return cmdSmtc(config);
   if (flags.testAssets) return cmdTestAssets(config);
   if (flags.watch) return cmdWatch(config);
+
+  const wantsTray = Boolean(flags.tray || (process.platform === 'win32' && config.windows?.tray));
+
+  // A hidden run has nowhere to print. Turned on implicitly with the tray,
+  // because the tray is how a hidden run is started and a hidden run with no
+  // log leaves nothing at all behind when something goes wrong.
+  //
+  // Opened before the config is validated, deliberately: a bad clientId is the
+  // most likely reason a fresh install refuses to start, and it is exactly the
+  // message that would otherwise be written to a console nobody has.
+  const logFile = flags.logFile ?? (wantsTray ? LOG_FILE : null);
+  if (logFile) {
+    const opened = setLogFile(logFile);
+    if (opened) log.debug(`Logging to ${opened}`);
+  }
 
   if (!flags.dryRun) {
     const problems = validateConfig(config);
     if (problems.length) {
       for (const problem of problems) log.error(problem);
-      log.error('Run `yanpresence --init` to create a config, then `yanpresence --doctor` to verify it.');
+      const hint = 'Run `yanpresence --init` to create a config, then `yanpresence --doctor` to verify it.';
+      log.error(hint);
+      // Launched from the Start menu there is no console and no exit code
+      // anyone will ever see, so "nothing happened" is the whole error
+      // message. Say it somewhere it can actually be read.
+      if (wantsTray) await showFatalDialog([...problems, '', hint].join('\n\n'), logFile);
       process.exit(1);
     }
   }
 
-  const app = new YanPresence(config, { dryRun: Boolean(flags.dryRun) });
-  app.start();
+  // Held for the lifetime of the process; released by Windows on exit.
+  const instanceLock = wantsTray ? claimSingleInstance() : null;
 
+  const app = new YanPresence(config, { dryRun: Boolean(flags.dryRun) });
+
+  let tray = null;
   let shuttingDown = false;
-  const shutdown = async (signal) => {
+  const shutdown = async (reason) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    log.info(`Received ${signal}, clearing presence and exiting`);
+    log.info(`${reason}, clearing presence and exiting`);
+    tray?.stop();
+    instanceLock?.close();
     await app.shutdown();
     process.exit(0);
   };
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+  if (wantsTray) {
+    if (process.platform !== 'win32') {
+      log.warn('--tray is a Windows notification-area icon and does nothing here; ignoring it.');
+    } else {
+      const { Tray } = await import('../src/tray.js');
+      tray = new Tray({ onQuit: () => shutdown('Quit from the tray'), logFile });
+      tray.start();
+      // What the icon says it is doing. Set from the same place the presence
+      // is, so the two can never disagree about what is playing.
+      app.onStatus = (text) => tray.setStatus(text ? `yanpresence — ${text}` : 'yanpresence', text || 'Nothing playing');
+    }
+  }
+
+  app.start();
+
+  process.on('SIGINT', () => shutdown('Received SIGINT'));
+  process.on('SIGTERM', () => shutdown('Received SIGTERM'));
 
   process.on('unhandledRejection', (err) => {
     log.error(`Unhandled rejection: ${err?.stack ?? err}`);

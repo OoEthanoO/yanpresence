@@ -8,9 +8,11 @@
   "storefront": "us",
 
   // Where playback state comes from.
-  //   "auto"       -> Music.app/TV.app on macOS, the web players elsewhere
-  //   "apple-apps" -> Music.app and TV.app over Apple Events (macOS only)
-  //   "browser"    -> music.apple.com (audio only; Apple TV needs TV.app)
+  //   "auto"       -> the Apple apps on macOS and Windows, the web player on
+  //                   Linux, where Apple ships no app at all
+  //   "apple-apps" -> the Apple Music and Apple TV apps themselves: over Apple
+  //                   Events on macOS, over the media session on Windows
+  //   "browser"    -> music.apple.com (audio only; Apple TV needs the app)
   "source": "auto",
 
   // The Apple Music web player. Read two ways, and both can be on at once: the
@@ -58,9 +60,36 @@
   //   "name"    -> "Apple Music"
   "statusDisplay": "details",
 
-  // Apple TV, through TV.app on macOS. Only one source holds the presence at a
-  // time: whatever is actually playing wins, and video beats audio when both
-  // are. Ignored when "source" resolves to "browser".
+  // Windows only, and inert everywhere else.
+  //
+  // tray: a notification-area icon whose menu has Quit. Off here because a run
+  //   from a terminal has Ctrl-C and does not need one — the Start menu
+  //   shortcut written by `npm run install-windows` passes --tray itself, so
+  //   turn this on only if you want the icon for terminal runs too. Windows 11
+  //   hides new tray icons behind the ^ arrow; drag it onto the taskbar to
+  //   keep it in view.
+  //
+  // appIds: prefixes of the identifiers the two Store apps publish their media
+  //   sessions under. Only worth touching if Apple reissues them under a
+  //   different package identity; `yanpresence --smtc` shows what is actually
+  //   being published.
+  "windows": {
+    "tray": false,
+    "appIds": {
+      "music": "AppleInc.AppleMusicWin",
+      "tv": "AppleInc.AppleTVWin"
+    }
+  },
+
+  // Apple TV, through TV.app on macOS and the Apple TV app on Windows. Only
+  // one source holds the presence at a time: whatever is actually playing
+  // wins, and video beats audio when both are. Ignored when "source" resolves
+  // to "browser".
+  //
+  // On Windows the show, the season and the episode are read out of the free
+  // text the app publishes to the media session rather than from properties,
+  // because there are no properties to ask for. Run `yanpresence --smtc` while
+  // something is playing to see both what arrived and what was made of it.
   //
   // clientId: Discord builds the card header from the *application* name, and
   //   one connection speaks for one application. Left empty, TV is announced
@@ -137,23 +166,36 @@
     "ffmpegPath": "ffmpeg",
     "img2webpPath": "img2webp",
 
-    // GPU encoding (Linux). Nothing to configure: devices are discovered,
-    // ffmpeg is asked what it can do, and anything that fails falls back to
-    // the CPU encoder with a warning.
+    // GPU encoding. Nothing to configure: devices are discovered, ffmpeg is
+    // asked what it can do, and anything that fails falls back to the CPU
+    // encoder with a warning.
     //
-    // Decode and scale go to NVDEC on a discrete NVIDIA card when there is
-    // one. The AV1 encode for AVIF goes to VAAPI on an AMD or Intel GPU
-    // instead — NVENC does encode AV1 on Ada, but AV1-in-HEIF out of NVENC is
-    // not a supported combination.
+    // mode: "auto" | "off" | "amf" | "vaapi".
+    //   "auto" hands the AV1 encode to AMD's AMF encoder on Windows when
+    //   there is an AMD adapter and an ffmpeg built with av1_amf. Measured on
+    //   a Radeon 780M: 19.6MB in 5.7s against libsvtav1 crf20's 21.4MB in
+    //   6.5s, and Chromium — which is what Discord is — decodes the result.
+    //
+    //   On Linux "auto" means the CPU, and that is not an oversight. The same
+    //   GPU through VAAPI produces AVIF that ffmpeg reads back happily and
+    //   Chromium refuses to decode, so the card renders a grey "?". Set
+    //   "vaapi" to force it anyway; it warns when you do.
     //
     // device: "auto" | "amd" | "intel" | "nvidia" | "/dev/dri/renderD129".
-    //   "auto" picks by vendor, not by number: renderD128 is the discrete
-    //   NVIDIA card on plenty of laptops, and it has no VAAPI encoder at all.
+    //   VAAPI only, and it picks by vendor rather than by number: renderD128
+    //   is the discrete NVIDIA card on plenty of laptops and has no VAAPI
+    //   encoder at all. AMF enumerates only AMD devices, so it cannot pick
+    //   wrong and ignores this.
+    //
+    // decode: hardware decode of the source video, independent of the encode.
+    //   Off because it measured slower nearly everywhere — including 7.5s
+    //   against 5.7s when paired with AMF, where the frames have to come back
+    //   to system memory for the scale filter and then go up again.
     "hardware": {
       "mode": "auto",
       "device": "auto",
-      "decode": true,
-      "qp": null
+      "decode": false,
+      "globalQuality": null
     }
   },
 

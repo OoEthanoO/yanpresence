@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import { MprisSource, unwrap } from '../src/mpris.js';
 import { setLevel } from '../src/log.js';
+import { NO_FAKE_BIN, writeFakeBin } from './fake-bin.js';
 
 setLevel('error');
 
@@ -25,14 +26,13 @@ const FIREFOX_TV_METADATA = `{"type":"a{sv}","data":{"xesam:title":{"type":"s","
  */
 function fakeBusctl(players) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yanpresence-mpris-'));
-  const script = path.join(dir, 'busctl');
   const fixture = path.join(dir, 'players.json');
 
   fs.writeFileSync(fixture, JSON.stringify(players));
-  fs.writeFileSync(
-    script,
-    `#!/usr/bin/env node
-const players = require(${JSON.stringify(fixture)});
+  const script = writeFakeBin(
+    dir,
+    'busctl',
+    `const players = require(${JSON.stringify(fixture)});
 const args = process.argv.slice(2);
 if (args.includes('list')) {
   process.stdout.write(Object.keys(players).map((n) => n + ' 1 x y z').join('\\n') + '\\n');
@@ -51,8 +51,7 @@ process.stdout.write(
    JSON.stringify({ type: 's', data: player.status }),
    JSON.stringify({ type: 'x', data: player.positionUs ?? 0 })].join('\\n') + '\\n'
 );
-`,
-    { mode: 0o755 }
+`
   );
 
   return { script, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
@@ -84,7 +83,7 @@ test('unwraps busctl GVariant envelopes, including nested arrays', () => {
   });
 });
 
-test('picks up Apple Music from a browser that publishes the page URL', async () => {
+test('picks up Apple Music from a browser that publishes the page URL', { skip: NO_FAKE_BIN }, async () => {
   const seen = await pollOnce({
     'org.mpris.MediaPlayer2.firefox.instance_1_131': {
       identity: 'Mozilla firefox_firefox',
@@ -99,7 +98,7 @@ test('picks up Apple Music from a browser that publishes the page URL', async ()
   assert.equal(seen.music.track.position, 89);
 });
 
-test('ignores a browser that publishes no page URL', async () => {
+test('ignores a browser that publishes no page URL', { skip: NO_FAKE_BIN }, async () => {
   const seen = await pollOnce({
     'org.mpris.MediaPlayer2.chromium.instance65074': {
       identity: 'Chrome',
@@ -115,7 +114,7 @@ test('ignores a browser that publishes no page URL', async () => {
   assert.equal(seen.music.state, 'closed');
 });
 
-test('an explicit player mapping overrides the missing URL', async () => {
+test('an explicit player mapping overrides the missing URL', { skip: NO_FAKE_BIN }, async () => {
   const seen = await pollOnce(
     {
       'org.mpris.MediaPlayer2.chromium.instance65074': {
@@ -133,7 +132,7 @@ test('an explicit player mapping overrides the missing URL', async () => {
   assert.equal(seen.music.track.duration, 30);
 });
 
-test('a mapping of "ignore" keeps a player out even when it identifies itself', async () => {
+test('a mapping of "ignore" keeps a player out even when it identifies itself', { skip: NO_FAKE_BIN }, async () => {
   const seen = await pollOnce(
     {
       'org.mpris.MediaPlayer2.firefox.instance_1_131': {
@@ -148,7 +147,7 @@ test('a mapping of "ignore" keeps a player out even when it identifies itself', 
   assert.equal(seen.music.active, false);
 });
 
-test('a tv.apple.com tab is ignored, even though it identifies itself', async () => {
+test('a tv.apple.com tab is ignored, even though it identifies itself', { skip: NO_FAKE_BIN }, async () => {
   // Apple TV is a TV.app source. A browser playing it is not half a source.
   const seen = await pollOnce({
     'org.mpris.MediaPlayer2.firefox.instance_1_2': {
@@ -161,7 +160,7 @@ test('a tv.apple.com tab is ignored, even though it identifies itself', async ()
   assert.equal(seen.music.active, false);
 });
 
-test('a playing tab wins over a paused one on the same channel', async () => {
+test('a playing tab wins over a paused one on the same channel', { skip: NO_FAKE_BIN }, async () => {
   const seen = await pollOnce({
     'org.mpris.MediaPlayer2.firefox.instance_1_1': {
       metadata: FIREFOX_METADATA,
@@ -177,7 +176,7 @@ test('a playing tab wins over a paused one on the same channel', async () => {
   assert.equal(seen.music.track.name, 'Something Else');
 });
 
-test('a stopped player reports nothing playing', async () => {
+test('a stopped player reports nothing playing', { skip: NO_FAKE_BIN }, async () => {
   const seen = await pollOnce({
     'org.mpris.MediaPlayer2.firefox.instance_1_131': {
       metadata: FIREFOX_METADATA,
@@ -187,7 +186,7 @@ test('a stopped player reports nothing playing', async () => {
   assert.equal(seen.music.active, false);
 });
 
-test('a player that refuses the query is skipped, not fatal', async () => {
+test('a player that refuses the query is skipped, not fatal', { skip: NO_FAKE_BIN }, async () => {
   const seen = await pollOnce({
     'org.mpris.MediaPlayer2.firefox.instance_1_1': { denied: true, metadata: FIREFOX_METADATA },
     'org.mpris.MediaPlayer2.firefox.instance_1_2': {
