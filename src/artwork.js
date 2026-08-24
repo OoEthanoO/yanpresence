@@ -13,6 +13,7 @@ import {
   planDecodeOnly,
   probeFfmpegCapabilities,
 } from './gpu.js';
+import { detectWindowsAdapters } from './win.js';
 
 /**
  * Apple ships motion ("animated") album artwork as an HLS video stream, which
@@ -66,14 +67,20 @@ export class ArtworkHost {
   async hardware() {
     if (this.hwProbe) return this.hwProbe;
     this.hwProbe = (async () => {
-      const nodes = detectRenderNodes({ drmClass: this.hwOpts.drmClass });
+      // Windows has no /sys/class/drm to read, so the adapters come from WMI.
+      // Same shape either way, and everything downstream reasons about the
+      // vendor rather than the path.
+      const nodes =
+        process.platform === 'win32'
+          ? await detectWindowsAdapters()
+          : detectRenderNodes({ drmClass: this.hwOpts.drmClass });
       const nvidia = hasNvidia();
       if (!nodes.length && !nvidia) {
         return { nodes, nvidia, capabilities: { available: false, encoders: new Set(), hwaccels: new Set() } };
       }
       const capabilities = await probeFfmpegCapabilities(this.opts.ffmpegPath);
       log.debug(
-        `GPU: ${nodes.map((n) => `${n.node}=${n.vendor}`).join(' ') || 'no render nodes'}` +
+        `GPU: ${nodes.map((n) => `${n.name || n.node}=${n.vendor}`).join(', ') || 'no render nodes'}` +
           `${nvidia ? ' + nvidia driver' : ''}`
       );
       return { nodes, nvidia, capabilities };

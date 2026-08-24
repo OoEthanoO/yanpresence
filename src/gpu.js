@@ -13,32 +13,47 @@ const VENDORS = {
 };
 
 /**
- * GPU encoding, and why it is off by default.
+ * GPU encoding: on through AMF, off through VAAPI, and the difference is
+ * measured rather than assumed.
  *
- * This was built to hand the AV1 encode to a GPU -- VAAPI on an AMD or Intel
- * device, since Ada's NVENC cannot produce AV1-in-HEIF. It works, in the sense
- * that ffmpeg produces a file and ffprobe reads it back. It is nonetheless the
- * wrong thing to ship, because of the one consumer that matters:
+ * The job is to hand the AV1 encode to a GPU, since Ada's NVENC cannot produce
+ * AV1-in-HEIF and that leaves the AMD and Intel paths. Both produce a file
+ * ffmpeg and ffprobe read back happily. Only one of them produces a file the
+ * consumer that matters can open, and the consumer that matters is Chromium,
+ * because Discord is Electron.
  *
- *   Measured on Ubuntu 26.04, Radeon 780M (RDNA3), ffmpeg 8.0.1, Mesa VAAPI,
- *   against a 20.6s 2160x2160 master encoded to 1024px:
+ *   VAAPI, on Ubuntu 26.04, Radeon 780M (RDNA3), ffmpeg 8.0.1, Mesa, against a
+ *   20.6s 2160x2160 master encoded to 1024px:
  *
  *     av1_vaapi output           Chromium REFUSES to decode it. Every variant
  *                                fails -- CQP, VBR, one tile, explicit level,
- *                                and a single still frame. Discord is Electron,
- *                                so the presence card renders the grey "?".
+ *                                and a single still frame. The presence card
+ *                                renders the grey "?".
  *     libsvtav1 output           Decodes everywhere, including Discord.
  *
- *     Speed, which was the point: 1.5s hardware against 2.6s libsvtav1, and
- *     hardware *decode* on either GPU was slower than software (4.9s NVDEC,
- *     3.9s VAAPI, 2.9s software) -- initialising a vendor stack costs more
- *     than decoding twenty seconds of H.264 saves.
+ *   AMF, on Windows 11, the same Radeon 780M, ffmpeg 9.0, against a 20s
+ *   2160x2160 master encoded to 1024px:
  *
- * So the fast path produces an image the only reader cannot open, to save a
- * second on a job that runs once per album and is then cached forever. The
- * encode stays on the CPU unless `hardware.mode` is set to "vaapi" by hand,
- * which is left in place for different hardware, a different driver, or a
- * consumer that is not Chromium.
+ *     av1_amf output             Chromium 148 decodes it. Structurally
+ *                                identical to the CPU encode -- a still cover
+ *                                image plus a 180-frame animation track, same
+ *                                dimensions, same duration.
+ *     Speed and size             5.7s / 19.6MB hardware against 6.5s / 21.4MB
+ *                                libsvtav1 crf20. Modestly faster, slightly
+ *                                smaller, same quality target.
+ *
+ * So it is the driver's bitstream packing that was the problem on Linux, not
+ * the silicon: the same chip through AMD's own SDK produces AVIF Chromium
+ * reads. "auto" therefore means the GPU on Windows where an AMD adapter and
+ * av1_amf are both present, and means the CPU on Linux, where choosing the
+ * hardware encoder would be choosing a broken card.
+ *
+ * Hardware *decode* is a separate switch and stays off on both. Measured:
+ * 4.9s NVDEC / 3.9s VAAPI / 2.9s software on Linux, and on Windows 6.1s with
+ * d3d11va against 6.5s without for the CPU encode -- but 7.5s against 5.7s
+ * for the AMF one, where the frames have to come back to system memory for the
+ * scale filter and then go up again. Initialising a vendor stack costs about
+ * what decoding twenty seconds of H.264 saves.
  *
  * Nothing here is trusted blindly either way: every hardware attempt is
  * verified, and a failure falls back to the CPU encoder for the rest of the
@@ -140,11 +155,19 @@ export function parseEncoders(text) {
  * arguments go before -i, `filter` is appended to the scale chain, and
  * `output` replaces the codec arguments.
  */
-export function planAvif({ capabilities, nodes, nvidia, config = {}, crf = 20 }) {
-  const mode = String(config.mode ?? 'off').toLowerCase();
-  // "auto" deliberately means the CPU here. See the note at the top of this
-  // file: the hardware encoder's output does not render in Discord, so
-  // choosing it automatically would be choosing a broken card.
+export function planAvif({ capabilities, nodes, nvidia, config = {}, crf = 20, platform = process.platform }) {
+  const mode = String(config.mode ?? 'auto').toLowerCase();
+  if (mode === 'off') return null;
+
+  // AMF is the one hardware encoder measured to produce AVIF Chromium will
+  // open, so it is the only one "auto" is willing to pick on its own.
+  if (mode === 'amf' || (mode === 'auto' && platform === 'win32')) {
+    return planAmf({ capabilities, nodes, config, crf, explicit: mode === 'amf' });
+  }
+
+  // "auto" means the CPU everywhere else. See the note at the top of this
+  // file: VAAPI's output does not render in Discord, so choosing it
+  // automatically would be choosing a broken card.
   if (mode !== 'vaapi') return null;
 
   const node = pickVaapiNode(nodes, config.device ?? 'auto');
@@ -194,13 +217,73 @@ export function planAvif({ capabilities, nodes, nvidia, config = {}, crf = 20 })
 }
 
 /**
+ * The AMD path on Windows: AV1 through AMF.
+ *
+ * No `-init_hw_device` and no `hwupload`, unlike VAAPI. AMF takes software
+ * frames directly and uploads them itself, which is not just less code -- it
+ * is what makes this work on a laptop with two GPUs. VAAPI has to be told
+ * which render node to use or it silently hands the wrong card's frames to the
+ * encoder; AMF is AMD's own SDK and enumerates only AMD devices, so there is
+ * no wrong card for it to pick.
+ */
+function planAmf({ capabilities, nodes, config, crf, explicit }) {
+  const amd = nodes.find((n) => n.vendor === 'amd');
+  const encoder = capabilities.encoders.has('av1_amf');
+
+  if (!amd || !encoder) {
+    // Only worth saying out loud when the user asked for this by name. Under
+    // "auto" on a machine with no AMD GPU, falling through to the CPU is the
+    // expected outcome, not a misconfiguration.
+    if (explicit) {
+      log.warn(
+        !amd
+          ? 'animatedArtwork.hardware.mode is "amf" but no AMD display adapter was found'
+          : 'animatedArtwork.hardware.mode is "amf" but this ffmpeg has no av1_amf encoder'
+      );
+    }
+    return null;
+  }
+
+  const qp = amfQp(config, crf);
+  return {
+    label: `av1_amf on ${amd.name || amd.node}`,
+    input: [],
+    // AMF accepts nv12 straight from the software filter chain.
+    filter: 'format=nv12',
+    output: [
+      '-c:v', 'av1_amf',
+      '-rc', 'cqp',
+      // Both frame types get the same quantizer: this is a short seamless loop
+      // where every frame is equally on screen, so there is no reason to spend
+      // the bit budget unevenly.
+      '-qp_i', String(qp),
+      '-qp_p', String(qp),
+      '-quality', 'high_quality',
+    ],
+  };
+}
+
+/**
+ * crf -> AV1 quantizer index. The same 3.5x the VAAPI path uses, and it lands
+ * in the same place: crf 20 (21.4MB on libsvtav1) against qp 70 (19.6MB) on a
+ * 20s 2160px master.
+ */
+function amfQp(config, crf) {
+  const explicit = Number(config.globalQuality);
+  if (Number.isFinite(explicit) && explicit > 0) return Math.round(explicit);
+  return Math.max(1, Math.min(255, Math.round(crf * 3.5)));
+}
+
+/**
  * Hardware decode for the paths that encode on the CPU anyway (WebP, GIF, and
  * the AVIF fallback). Reading and scaling the master is most of the work there.
  */
-export function planDecodeOnly({ capabilities, nodes, nvidia, config = {} }) {
-  const args = decodeArgs({ capabilities, nodes, nvidia, config });
+export function planDecodeOnly({ capabilities, nodes, nvidia, config = {}, platform = process.platform }) {
+  const args = decodeArgs({ capabilities, nodes, nvidia, config, platform });
   if (!args.length) return null;
-  return { label: args.includes('cuda') ? 'NVDEC decode' : 'VAAPI decode', input: args };
+  const api = args[args.indexOf('-hwaccel') + 1];
+  const LABELS = { cuda: 'NVDEC decode', vaapi: 'VAAPI decode', d3d11va: 'D3D11VA decode' };
+  return { label: LABELS[api] ?? `${api} decode`, input: args };
 }
 
 function globalQuality(config, crf) {
@@ -216,8 +299,15 @@ function globalQuality(config, crf) {
  * 2.9s against 4.9s on NVDEC and 3.9s on VAAPI. Initialising a vendor stack
  * costs more than decoding twenty seconds of H.264 saves.
  */
-function decodeArgs({ capabilities, nodes = [], nvidia, config }) {
+function decodeArgs({ capabilities, nodes = [], nvidia, config, platform = process.platform }) {
   if (config.decode !== true) return [];
+
+  // D3D11VA is the vendor-neutral one on Windows: it serves the AMD iGPU, the
+  // discrete NVIDIA card and Intel graphics through the same interface, so
+  // there is no device to pick and nothing to get wrong.
+  if (platform === 'win32') {
+    return capabilities.hwaccels.has('d3d11va') ? ['-hwaccel', 'd3d11va'] : [];
+  }
 
   // No -hwaccel_output_format: frames come back to system memory, which is
   // what both the software filters and the VAAPI upload want.
@@ -232,10 +322,10 @@ function decodeArgs({ capabilities, nodes = [], nvidia, config }) {
 
 /** A one-line summary for --doctor. */
 export function describeHardware({ nodes, nvidia, capabilities }) {
-  const parts = nodes.map((n) => `${n.node} (${n.vendor})`);
+  const parts = nodes.map((n) => `${n.name || n.node} (${n.vendor})`);
   if (nvidia) parts.push('nvidia driver loaded');
-  const encoders = ['av1_vaapi', 'av1_nvenc', 'libsvtav1', 'libaom-av1'].filter((e) =>
-    capabilities.encoders.has(e)
+  const encoders = ['av1_amf', 'av1_vaapi', 'av1_qsv', 'av1_nvenc', 'libsvtav1', 'libaom-av1'].filter(
+    (e) => capabilities.encoders.has(e)
   );
   return {
     devices: parts.join(', ') || 'none found',

@@ -14,6 +14,7 @@ import {
 import { ArtworkHost } from '../src/artwork.js';
 import { DEFAULTS } from '../src/config.js';
 import { setLevel } from '../src/log.js';
+import { NO_FAKE_BIN } from './fake-bin.js';
 
 setLevel('error');
 
@@ -90,15 +91,85 @@ test("ffmpeg's encoder listing is parsed into names", () => {
   assert.ok(!names.includes('='));
 });
 
-test('the GPU is never chosen on its own, however capable it looks', () => {
+test('VAAPI is never chosen on its own, however capable it looks', () => {
   const nodes = detectRenderNodes({ drmClass: fakeDrm(LAPTOP) });
   const capabilities = CAPABILITIES('av1_vaapi', 'av1_nvenc', 'libsvtav1');
+  const linux = { platform: 'linux' };
 
   // Measured: Chromium refuses to decode av1_vaapi's AVIF, and Discord is
   // Electron. A faster encoder that produces an unreadable card is not a
-  // default, so "auto" means the CPU.
-  assert.equal(planAvif({ capabilities, nodes, nvidia: true, crf: 20 }), null);
-  assert.equal(planAvif({ capabilities, nodes, nvidia: true, config: { mode: 'auto' }, crf: 20 }), null);
+  // default, so "auto" means the CPU here.
+  assert.equal(planAvif({ capabilities, nodes, nvidia: true, crf: 20, ...linux }), null);
+  assert.equal(
+    planAvif({ capabilities, nodes, nvidia: true, config: { mode: 'auto' }, crf: 20, ...linux }),
+    null
+  );
+});
+
+/* ---------------------------------------------------------------- *
+ * AMF, which is the one hardware encoder that produces a readable card
+ * ---------------------------------------------------------------- */
+
+const AMD_ADAPTER = { node: 'AMD Radeon 780M Graphics', vendor: 'amd', name: 'AMD Radeon 780M Graphics' };
+const NVIDIA_ADAPTER = { node: 'NVIDIA GeForce RTX 4070 Laptop GPU', vendor: 'nvidia', name: 'RTX 4070' };
+
+test('AMF is chosen on its own on Windows, where the output does decode', () => {
+  const plan = planAvif({
+    capabilities: CAPABILITIES('av1_amf', 'av1_nvenc', 'libsvtav1'),
+    nodes: [NVIDIA_ADAPTER, AMD_ADAPTER],
+    nvidia: false,
+    config: { mode: 'auto' },
+    crf: 20,
+    platform: 'win32',
+  });
+
+  assert.ok(plan);
+  assert.deepEqual(plan.output.slice(0, 2), ['-c:v', 'av1_amf']);
+  assert.equal(plan.output[plan.output.indexOf('-rc') + 1], 'cqp');
+  // The same 3.5x the VAAPI path uses: crf 20 lands on qp 70.
+  assert.equal(plan.output[plan.output.indexOf('-qp_i') + 1], '70');
+  assert.equal(plan.output[plan.output.indexOf('-qp_p') + 1], '70');
+
+  // No device to name and no hwupload: AMF enumerates only AMD devices and
+  // takes software frames itself, which is what makes it safe on a machine
+  // that also has an NVIDIA card.
+  assert.deepEqual(plan.input, []);
+  assert.equal(plan.filter, 'format=nv12');
+  assert.ok(plan.label.includes('780M'), 'names the adapter it picked');
+});
+
+test('AMF falls through to the CPU without an AMD card or the encoder', () => {
+  const windows = { nvidia: false, config: { mode: 'auto' }, crf: 20, platform: 'win32' };
+
+  assert.equal(
+    planAvif({ capabilities: CAPABILITIES('av1_amf', 'libsvtav1'), nodes: [NVIDIA_ADAPTER], ...windows }),
+    null,
+    'an NVIDIA-only machine gets no AMF plan'
+  );
+  assert.equal(
+    planAvif({ capabilities: CAPABILITIES('libsvtav1'), nodes: [AMD_ADAPTER], ...windows }),
+    null,
+    'nor does an ffmpeg built without av1_amf'
+  );
+});
+
+test('"off" still means off on Windows, and globalQuality still overrides', () => {
+  const capabilities = CAPABILITIES('av1_amf', 'libsvtav1');
+  const nodes = [AMD_ADAPTER];
+
+  assert.equal(
+    planAvif({ capabilities, nodes, nvidia: false, config: { mode: 'off' }, crf: 20, platform: 'win32' }),
+    null
+  );
+  const forced = planAvif({
+    capabilities,
+    nodes,
+    nvidia: false,
+    config: { mode: 'amf', globalQuality: 120 },
+    crf: 20,
+    platform: 'win32',
+  });
+  assert.equal(forced.output[forced.output.indexOf('-qp_i') + 1], '120');
 });
 
 test('AVIF goes to the VAAPI device when explicitly asked for', () => {
@@ -164,21 +235,37 @@ test('hardware can be turned off outright', () => {
 test('hardware decode is opt-in, and prefers the discrete card when asked for', () => {
   const nodes = detectRenderNodes({ drmClass: fakeDrm(LAPTOP) });
   const capabilities = CAPABILITIES('av1_vaapi');
+  // Stated rather than inherited from the host: this describes the Linux
+  // choice between NVDEC and VAAPI, and Windows makes a different one.
+  const linux = { platform: 'linux' };
 
   // Measured to be a pessimisation on this workload, so it stays off unless
   // asked for by name.
-  assert.equal(planDecodeOnly({ capabilities, nodes, nvidia: true }), null);
+  assert.equal(planDecodeOnly({ capabilities, nodes, nvidia: true, ...linux }), null);
 
-  assert.deepEqual(planDecodeOnly({ capabilities, nodes, nvidia: true, config: { decode: true } }).input, [
-    '-hwaccel',
-    'cuda',
-  ]);
-  assert.deepEqual(planDecodeOnly({ capabilities, nodes, nvidia: false, config: { decode: true } }).input, [
-    '-hwaccel',
-    'vaapi',
-    '-hwaccel_device',
-    '/dev/dri/renderD129',
-  ]);
+  assert.deepEqual(
+    planDecodeOnly({ capabilities, nodes, nvidia: true, config: { decode: true }, ...linux }).input,
+    ['-hwaccel', 'cuda']
+  );
+  assert.deepEqual(
+    planDecodeOnly({ capabilities, nodes, nvidia: false, config: { decode: true }, ...linux }).input,
+    ['-hwaccel', 'vaapi', '-hwaccel_device', '/dev/dri/renderD129']
+  );
+});
+
+test('Windows decodes through D3D11VA, whichever card is in the machine', () => {
+  const capabilities = CAPABILITIES('av1_amf');
+  capabilities.hwaccels = new Set(['d3d11va', 'cuda', 'qsv']);
+  const nodes = [{ node: 'AMD Radeon 780M Graphics', vendor: 'amd', name: 'AMD Radeon 780M Graphics' }];
+  const windows = { platform: 'win32' };
+
+  assert.equal(planDecodeOnly({ capabilities, nodes, nvidia: false, ...windows }), null);
+
+  // D3D11VA and no device argument: it is the vendor-neutral interface, so
+  // there is nothing to pick and nothing to get wrong.
+  const plan = planDecodeOnly({ capabilities, nodes, nvidia: true, config: { decode: true }, ...windows });
+  assert.deepEqual(plan.input, ['-hwaccel', 'd3d11va']);
+  assert.equal(plan.label, 'D3D11VA decode');
 });
 
 /* ---------------------------------------------------------------- *
@@ -240,7 +327,7 @@ function hostWith({ ffmpeg, ffprobe, drmClass }) {
   });
 }
 
-test('AVIF is encoded on the GPU when the GPU can do it', async () => {
+test('AVIF is encoded on the GPU when the GPU can do it', { skip: NO_FAKE_BIN }, async () => {
   const fake = fakeFfmpeg({ failOn: 'nothing-fails-here' });
   const host = hostWith({ ...fake, drmClass: fakeDrm(LAPTOP) });
   const out = path.join(fake.dir, 'out.avif');
@@ -253,7 +340,7 @@ test('AVIF is encoded on the GPU when the GPU can do it', async () => {
   assert.ok(!log.includes('libsvtav1'), 'did not also run the CPU encoder');
 });
 
-test('a hardware encoder that fails falls back to the CPU, once', async () => {
+test('a hardware encoder that fails falls back to the CPU, once', { skip: NO_FAKE_BIN }, async () => {
   const fake = fakeFfmpeg({ failOn: 'av1_vaapi' });
   const host = hostWith({ ...fake, drmClass: fakeDrm(LAPTOP) });
   const out = path.join(fake.dir, 'out.avif');
