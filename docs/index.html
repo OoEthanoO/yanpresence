@@ -1,0 +1,993 @@
+<title>yanpresence</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Apple Music rich presence for Discord. The song on your status line, full-length animated album art, on macOS, Windows and Linux.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+  /* Dark-first on purpose: the thing this software makes appears inside
+     Discord, and Discord is dark. Light is a full, deliberate second theme. */
+  :root {
+    --ground: #0E0E13;
+    --surface: #17171F;
+    --surface-2: #1E1E28;
+    --line: #262633;
+    --line-soft: #1F1F2A;
+    --text: #EDEDF2;
+    --muted: #9A9AAD;
+    --faint: #7E7E92;
+    --accent: #FA243C;
+    --accent-soft: #FF6B80;
+    /* Apple Music's red carries white text at only 3.9:1, so anything filled
+       with it and labelled in white steps down to a deeper shade. The vivid
+       one stays for text and rules, where it sits on the ground at 4.9:1. */
+    --accent-fill: #D80F27;
+    --accent-fill-hover: #E01734;
+    --blurple: #5865F2;
+    --good: #43B581;
+    --shadow: 0 24px 60px -24px rgb(0 0 0 / 0.75);
+    --card-ring: rgb(255 255 255 / 0.07);
+
+    --step--1: clamp(0.78rem, 0.76rem + 0.1vw, 0.84rem);
+    --step-0: clamp(1rem, 0.97rem + 0.16vw, 1.09rem);
+    --step-1: clamp(1.2rem, 1.13rem + 0.34vw, 1.42rem);
+    --step-2: clamp(1.5rem, 1.36rem + 0.68vw, 1.95rem);
+    --step-3: clamp(1.95rem, 1.65rem + 1.5vw, 2.9rem);
+    --step-4: clamp(2.6rem, 1.9rem + 3.4vw, 4.6rem);
+
+    --measure: 63ch;
+    --gutter: clamp(1.25rem, 5vw, 3.5rem);
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --ground: #FBFAFC;
+      --surface: #FFFFFF;
+      --surface-2: #F4F3F7;
+      --line: #E1E0E8;
+      --line-soft: #ECEBF1;
+      --text: #16161D;
+      --muted: #5C5C6B;
+      --faint: #6E6E7E;
+      --accent: #D80F27;
+      --accent-soft: #B00C1F;
+      --accent-fill: #C8102E;
+      --accent-fill-hover: #B00C1F;
+      --blurple: #4752C4;
+      --good: #1F7A55;
+      --shadow: 0 24px 50px -28px rgb(20 20 35 / 0.28);
+      --card-ring: rgb(20 20 40 / 0.09);
+    }
+  }
+
+  :root[data-theme="light"] {
+    --ground: #FBFAFC;
+    --surface: #FFFFFF;
+    --surface-2: #F4F3F7;
+    --line: #E1E0E8;
+    --line-soft: #ECEBF1;
+    --text: #16161D;
+    --muted: #5C5C6B;
+    --faint: #6E6E7E;
+    --accent: #D80F27;
+    --accent-soft: #B00C1F;
+    --accent-fill: #C8102E;
+    --accent-fill-hover: #B00C1F;
+    --blurple: #4752C4;
+    --good: #1F7A55;
+    --shadow: 0 24px 50px -28px rgb(20 20 35 / 0.28);
+    --card-ring: rgb(20 20 40 / 0.09);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--text);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: var(--step-0);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3 {
+    font-family: "Bricolage Grotesque", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    font-weight: 800;
+    line-height: 1.04;
+    letter-spacing: -0.022em;
+    text-wrap: balance;
+    margin: 0;
+  }
+
+  a { color: inherit; }
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+
+  code, kbd, pre { font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace; }
+
+  .wrap {
+    width: min(100% - (var(--gutter) * 2), 76rem);
+    margin-inline: auto;
+  }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: var(--step--1);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin: 0;
+  }
+
+  .lede { color: var(--muted); max-width: var(--measure); font-size: var(--step-1); }
+
+  section { padding-block: clamp(3.5rem, 9vw, 7rem); }
+  section + section { border-top: 1px solid var(--line-soft); }
+
+  /* ---------------- header ---------------- */
+
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    backdrop-filter: blur(14px);
+    background: color-mix(in srgb, var(--ground) 82%, transparent);
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .topbar-inner {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding-block: 0.85rem;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-family: "Bricolage Grotesque", sans-serif;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    font-size: 1.05rem;
+    text-decoration: none;
+  }
+  .brand svg { display: block; width: 26px; height: 26px; border-radius: 7px; }
+  .topbar nav { margin-left: auto; display: flex; align-items: center; gap: 1.4rem; }
+  .topbar nav a {
+    text-decoration: none;
+    color: var(--muted);
+    font-size: var(--step--1);
+    letter-spacing: 0.01em;
+  }
+  .topbar nav a:hover { color: var(--text); }
+  @media (max-width: 46rem) { .topbar nav a.hide-sm { display: none; } }
+
+  /* ---------------- hero ---------------- */
+
+  .hero { padding-block: clamp(3rem, 8vw, 6rem) clamp(3.5rem, 9vw, 6.5rem); }
+  .hero-grid {
+    display: grid;
+    gap: clamp(2.5rem, 6vw, 5rem);
+    grid-template-columns: 1fr;
+    align-items: center;
+  }
+  @media (min-width: 62rem) {
+    .hero-grid { grid-template-columns: 1.05fr 0.95fr; }
+  }
+
+  .hero h1 {
+    font-size: var(--step-4);
+    margin-block: 0.6rem 1.2rem;
+  }
+  .hero h1 em {
+    font-style: normal;
+    color: var(--accent);
+  }
+
+  .cta-row { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 2rem; }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.78rem 1.3rem;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    font: inherit;
+    font-weight: 600;
+    font-size: var(--step--1);
+    letter-spacing: 0.01em;
+    text-decoration: none;
+    cursor: pointer;
+    transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+  }
+  .btn-primary { background: var(--accent-fill); color: #fff; }
+  .btn-primary:hover { transform: translateY(-1px); background: var(--accent-fill-hover); }
+  .btn-ghost { border-color: var(--line); color: var(--text); background: transparent; }
+  .btn-ghost:hover { border-color: var(--muted); transform: translateY(-1px); }
+  .btn svg { width: 16px; height: 16px; }
+
+  .hero-note {
+    margin-top: 1.4rem;
+    font-size: var(--step--1);
+    color: var(--faint);
+  }
+
+  /* ---------------- the discord card ---------------- */
+
+  .stage { display: grid; gap: 0.9rem; justify-items: center; }
+
+  .switch {
+    display: inline-flex;
+    padding: 3px;
+    gap: 2px;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+  }
+  .switch button {
+    font: inherit;
+    font-size: var(--step--1);
+    font-weight: 500;
+    color: var(--muted);
+    background: none;
+    border: 0;
+    padding: 0.4rem 0.95rem;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .switch button[aria-selected="true"] { background: var(--surface); color: var(--text); }
+
+  .card {
+    width: min(100%, 26rem);
+    background: var(--surface);
+    border: 1px solid var(--card-ring);
+    border-radius: 14px;
+    padding: 1.15rem;
+    box-shadow: var(--shadow);
+  }
+  .card-head {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.9rem;
+  }
+  .card-body { display: flex; gap: 0.9rem; }
+
+  .art {
+    position: relative;
+    flex: 0 0 auto;
+    width: 88px;
+    height: 88px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #201826;
+  }
+  /* Standing in for motion artwork rather than faking a real cover. */
+  .art::before {
+    content: "";
+    position: absolute;
+    inset: -35%;
+    background:
+      radial-gradient(circle at 30% 30%, #FF3355 0%, transparent 45%),
+      radial-gradient(circle at 72% 62%, #7A2BE2 0%, transparent 50%),
+      conic-gradient(from 210deg, #FA243C, #FF9E5E, #7A2BE2, #FA243C);
+    animation: drift 14s linear infinite;
+  }
+  .art::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(160deg, rgb(255 255 255 / 0.16), transparent 55%);
+  }
+  @keyframes drift { to { transform: rotate(360deg); } }
+
+  .badge {
+    position: absolute;
+    right: -5px;
+    bottom: -5px;
+    width: 27px;
+    height: 27px;
+    border-radius: 50%;
+    background: var(--surface);
+    display: grid;
+    place-items: center;
+    z-index: 2;
+    border: 2px solid var(--surface);
+  }
+  .badge svg { width: 21px; height: 21px; border-radius: 6px; }
+
+  .meta { min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 0.12rem; }
+  .meta .t {
+    font-weight: 600;
+    font-size: 0.95rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .meta .s, .meta .a {
+    font-size: 0.82rem;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .meta a.link { color: var(--muted); text-decoration: none; border-bottom: 1px solid transparent; }
+  .meta a.link:hover { color: var(--text); border-bottom-color: var(--accent); }
+
+  .bar-row { margin-top: 0.7rem; display: flex; align-items: center; gap: 0.5rem; }
+  .bar {
+    flex: 1;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--line);
+    overflow: hidden;
+  }
+  .bar span { display: block; height: 100%; background: var(--text); border-radius: 999px; }
+  .time {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.7rem;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* The one-line status, which is the whole argument */
+  .statusline {
+    margin-top: 1.4rem;
+    width: min(100%, 26rem);
+    border: 1px dashed var(--line);
+    border-radius: 10px;
+    padding: 0.8rem 0.95rem;
+    display: grid;
+    gap: 0.55rem;
+    background: color-mix(in srgb, var(--surface) 55%, transparent);
+  }
+  .statusline .row { display: flex; align-items: baseline; gap: 0.6rem; font-size: 0.85rem; }
+  .statusline .who { font-weight: 600; }
+  .statusline .what { color: var(--muted); }
+  .statusline .what b { color: var(--text); font-weight: 600; }
+  .statusline .tag {
+    margin-left: auto;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+
+  /* ---------------- generic blocks ---------------- */
+
+  .section-head { display: grid; gap: 0.9rem; margin-bottom: clamp(2rem, 4vw, 3rem); }
+  .section-head h2 { font-size: var(--step-3); }
+
+  .cols {
+    display: grid;
+    gap: 1px;
+    background: var(--line-soft);
+    border: 1px solid var(--line-soft);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  @media (min-width: 54rem) { .cols { grid-template-columns: repeat(3, 1fr); } }
+
+  .col { background: var(--ground); padding: clamp(1.4rem, 3vw, 2rem); display: grid; gap: 0.7rem; align-content: start; }
+  .col h3 { font-size: var(--step-1); font-weight: 600; letter-spacing: -0.015em; }
+  .col p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+  .col .mech {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.74rem;
+    color: var(--accent);
+    letter-spacing: 0.02em;
+  }
+  .col dl { margin: 0.3rem 0 0; display: grid; gap: 0.45rem; font-size: 0.86rem; }
+  .col dt { color: var(--faint); font-family: "IBM Plex Mono", monospace; font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; }
+  .col dd { margin: 0; color: var(--muted); }
+
+  .feature-grid { display: grid; gap: clamp(1.5rem, 3vw, 2.4rem); }
+  @media (min-width: 48rem) { .feature-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 72rem) { .feature-grid { grid-template-columns: repeat(4, 1fr); } }
+  .feature h3 { font-size: 1.02rem; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 0.4rem; }
+  .feature p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+  .feature .num {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.72rem;
+    color: var(--accent);
+    letter-spacing: 0.08em;
+    display: block;
+    margin-bottom: 0.7rem;
+  }
+
+  /* ---------------- artwork table ---------------- */
+
+  .split { display: grid; gap: clamp(2rem, 5vw, 4rem); align-items: start; }
+  @media (min-width: 60rem) { .split { grid-template-columns: 0.9fr 1.1fr; } }
+
+  .table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.88rem; }
+  th, td { padding: 0.7rem 1rem; text-align: left; white-space: nowrap; }
+  thead th {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--faint);
+    font-weight: 500;
+    border-bottom: 1px solid var(--line);
+  }
+  tbody tr + tr td { border-top: 1px solid var(--line-soft); }
+  td.n { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; text-align: right; }
+  tr.win td { color: var(--text); }
+  tr.win td:first-child { box-shadow: inset 3px 0 0 var(--accent); font-weight: 600; }
+  tbody tr:not(.win) td { color: var(--muted); }
+
+  /* ---------------- install ---------------- */
+
+  .tabs { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 1.1rem; }
+  .tabs button {
+    font: inherit;
+    font-size: var(--step--1);
+    font-weight: 500;
+    padding: 0.45rem 1rem;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .tabs button[aria-selected="true"] {
+    background: var(--text);
+    color: var(--ground);
+    border-color: var(--text);
+  }
+
+  .steps { display: grid; gap: 1.1rem; counter-reset: step; }
+  .step { display: grid; gap: 0.5rem; }
+  .step h4 {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .step h4::before {
+    counter-increment: step;
+    content: counter(step);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.7rem;
+    width: 1.5rem;
+    height: 1.5rem;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    border: 1px solid var(--line);
+    color: var(--faint);
+    flex: none;
+  }
+  .step p { margin: 0 0 0 2.1rem; color: var(--muted); font-size: 0.9rem; }
+
+  .snippet {
+    position: relative;
+    margin-left: 2.1rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+  }
+  .snippet pre {
+    margin: 0;
+    padding: 0.85rem 3.2rem 0.85rem 1rem;
+    overflow-x: auto;
+    font-size: 0.83rem;
+    line-height: 1.7;
+  }
+  .snippet .cmt { color: var(--faint); }
+  .copy {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    font: inherit;
+    font-size: 0.68rem;
+    font-family: "IBM Plex Mono", monospace;
+    padding: 0.3rem 0.55rem;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+    background: var(--surface-2);
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .copy:hover { color: var(--text); }
+  .copy[data-done="1"] { color: var(--good); border-color: var(--good); }
+
+  .callout {
+    margin-top: 1.6rem;
+    padding: 1rem 1.15rem;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+  .callout b { color: var(--text); font-weight: 600; }
+
+  .reqs { display: grid; gap: 0.7rem; margin: 0; padding: 0; list-style: none; }
+  .reqs li { display: flex; gap: 0.7rem; font-size: 0.92rem; color: var(--muted); }
+  .reqs li::before { content: "—"; color: var(--accent); flex: none; }
+  .reqs b { color: var(--text); font-weight: 600; }
+
+  footer {
+    border-top: 1px solid var(--line-soft);
+    padding-block: 2.5rem 3.5rem;
+    color: var(--faint);
+    font-size: 0.85rem;
+  }
+  footer .fin { display: flex; flex-wrap: wrap; gap: 1.2rem; align-items: center; }
+  footer a { color: var(--muted); text-decoration: none; }
+  footer a:hover { color: var(--text); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+</style>
+
+<a class="skip" href="#get" style="position:absolute;left:-9999px">Skip to download</a>
+
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <a class="brand" href="#top">
+      <svg viewBox="0 0 64 64" aria-hidden="true">
+        <defs>
+          <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#FA243C"/><stop offset="1" stop-color="#FB5C74"/>
+          </linearGradient>
+        </defs>
+        <rect x="1" y="1" width="62" height="62" rx="15" fill="url(#g1)"/>
+        <g fill="#fff">
+          <rect x="28.4" y="11.5" width="24.8" height="8.6" rx="1.6"/>
+          <rect x="28.4" y="15" width="4.8" height="30" rx="1.6"/>
+          <rect x="48.4" y="11.5" width="4.8" height="30" rx="1.6"/>
+          <ellipse cx="23.6" cy="44.8" rx="9.6" ry="7.5"/>
+          <ellipse cx="43.6" cy="41.9" rx="9.6" ry="7.5"/>
+        </g>
+      </svg>
+      yanpresence
+    </a>
+    <nav>
+      <a href="#how" class="hide-sm">How it works</a>
+      <a href="#artwork" class="hide-sm">Animated art</a>
+      <a href="#get">Download</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- ============ hero ============ -->
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <p class="eyebrow">Apple Music → Discord</p>
+        <h1>Your status line says the <em>song</em>.</h1>
+        <p class="lede">
+          yanpresence mirrors what you're playing into Discord — laid out like Discord's own
+          Spotify integration, but with the track name where everyone can read it, album art at
+          full size, and the song, artist and album all clickable straight back to Apple Music.
+        </p>
+
+        <div class="cta-row">
+          <a class="btn btn-primary" href="https://github.com/OoEthanoO/yanpresence/archive/refs/heads/main.zip">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Download source
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/OoEthanoO/yanpresence" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.8 0-1.3.5-2.3 1.2-3.2 0-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0C17.3 4.6 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.9 1.2 1.9 1.2 3.2 0 4.5-2.7 5.5-5.3 5.8.4.4.8 1.1.8 2.2v3.3c0 .4.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5z"/>
+            </svg>
+            View on GitHub
+          </a>
+        </div>
+
+        <p class="hero-note">
+          MIT licensed · zero npm dependencies · macOS, Windows and Linux
+        </p>
+      </div>
+
+      <div class="stage">
+        <div class="switch" role="tablist" aria-label="Which card to preview">
+          <button role="tab" id="tab-music" aria-selected="true" aria-controls="card">Apple Music</button>
+          <button role="tab" id="tab-tv" aria-selected="false" aria-controls="card">Apple TV</button>
+        </div>
+
+        <div class="card" id="card" role="tabpanel" aria-labelledby="tab-music">
+          <div class="card-head" id="c-head">Listening to Apple Music</div>
+          <div class="card-body">
+            <div class="art">
+              <div class="badge">
+                <svg viewBox="0 0 64 64" aria-hidden="true">
+                  <rect x="1" y="1" width="62" height="62" rx="15" fill="url(#g1)"/>
+                  <g fill="#fff">
+                    <rect x="28.4" y="11.5" width="24.8" height="8.6" rx="1.6"/>
+                    <rect x="28.4" y="15" width="4.8" height="30" rx="1.6"/>
+                    <rect x="48.4" y="11.5" width="4.8" height="30" rx="1.6"/>
+                    <ellipse cx="23.6" cy="44.8" rx="9.6" ry="7.5"/>
+                    <ellipse cx="43.6" cy="41.9" rx="9.6" ry="7.5"/>
+                  </g>
+                </svg>
+              </div>
+            </div>
+            <div class="meta">
+              <div class="t" id="c-title">Be Her</div>
+              <div class="s"><a class="link" href="#" id="c-sub">Ella Langley</a></div>
+              <div class="bar-row">
+                <div class="bar"><span id="c-bar" style="width:33%"></span></div>
+                <span class="time" id="c-time">1:04</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="statusline">
+          <div class="row">
+            <span class="who">yanxu</span>
+            <span class="what" id="c-status">Listening to <b>Be Her</b></span>
+            <span class="tag">status line</span>
+          </div>
+          <div class="row">
+            <span class="who" style="color:var(--faint)">someone else</span>
+            <span class="what">Listening to <b>Ella Langley</b></span>
+            <span class="tag">spotify</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ features ============ -->
+  <section id="features">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">What you get</p>
+        <h2>Built to match Discord's own integration, then go past it.</h2>
+      </div>
+
+      <div class="feature-grid">
+        <div class="feature">
+          <span class="num">THE STATUS LINE</span>
+          <h3>The song, not the artist</h3>
+          <p>Discord picks one field for the one-line status under your name. Spotify points it at the artist; yanpresence points it at the track, so your status reads the way people expect.</p>
+        </div>
+        <div class="feature">
+          <span class="num">ARTWORK</span>
+          <h3>1024×1024 covers</h3>
+          <p>Pulled from Apple's artwork CDN at the full square size Discord's own docs recommend — not the thumbnail a media notification would hand over.</p>
+        </div>
+        <div class="feature">
+          <span class="num">LINKS</span>
+          <h3>Three clickable fields</h3>
+          <p>Song, artist and album each link back to Apple Music. Hovering the cover shows the album; clicking opens it.</p>
+        </div>
+        <div class="feature">
+          <span class="num">PLAYBACK</span>
+          <h3>A live progress bar</h3>
+          <p>With seek detection — scrub the track and the bar follows. Pause and the status disappears, the same way Discord's Spotify integration behaves.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ how it works ============ -->
+  <section id="how">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Three platforms</p>
+        <h2>Three completely different ways in. One pipeline.</h2>
+        <p class="lede">
+          Apple gives up playback state differently on every platform — and on Windows, differently
+          for each of its two apps. Every source hands back an identical snapshot, so catalog
+          lookups, links, artwork and the card itself never know which one they're serving.
+        </p>
+      </div>
+
+      <div class="cols">
+        <div class="col">
+          <h3>macOS</h3>
+          <p class="mech">Apple Events</p>
+          <p>Music.app and TV.app are scripted through the same iTunes-descended dictionary, read by a resident <code>osascript</code> rather than one spawn per poll.</p>
+          <dl>
+            <dt>Apple Music</dt><dd>Music.app</dd>
+            <dt>Apple TV</dt><dd>TV.app</dd>
+          </dl>
+        </div>
+
+        <div class="col">
+          <h3>Windows</h3>
+          <p class="mech">Media session + UI Automation</p>
+          <p>Apple Music publishes a media session — the record behind the flyout over the volume overlay. Apple TV publishes none at all, so it's read off the player's own accessibility tree.</p>
+          <dl>
+            <dt>Apple Music</dt><dd>SMTC session</dd>
+            <dt>Apple TV</dt><dd>UI Automation</dd>
+          </dl>
+        </div>
+
+        <div class="col">
+          <h3>Linux</h3>
+          <p class="mech">Browser web player</p>
+          <p>Apple ships no Linux app, so playback comes from <code>music.apple.com</code> — over a companion extension, over MPRIS on the session bus, or both at once.</p>
+          <dl>
+            <dt>Apple Music</dt><dd>Extension / MPRIS</dd>
+            <dt>Apple TV</dt><dd>Not available</dd>
+          </dl>
+        </div>
+      </div>
+
+      <div class="callout">
+        <b>On Windows it also runs as an app.</b> A Start menu entry so Windows Search finds it,
+        and a notification-area icon whose menu has Quit — which clears your presence with Discord
+        on the way out rather than leaving a stale status behind.
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ animated artwork ============ -->
+  <section id="artwork">
+    <div class="wrap split">
+      <div class="section-head" style="margin-bottom:0">
+        <p class="eyebrow">Animated artwork</p>
+        <h2>The whole loop. Full resolution. 3.7&nbsp;MB.</h2>
+        <p class="lede" style="font-size:var(--step-0)">
+          Apple publishes motion covers for a lot of albums, but ships them as HLS video, which
+          Discord can't render. Transcoding to GIF is why full-length motion art looked impossible —
+          it lands around 128&nbsp;MB. AVIF changes the arithmetic completely, so nothing has to be
+          cut, shrunk or degraded.
+        </p>
+        <p class="lede" style="font-size:0.9rem;color:var(--faint)">
+          Measured on a real Apple motion master — the full 20.6s loop at source framerate.
+        </p>
+      </div>
+
+      <div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr><th scope="col">Format</th><th scope="col">Size</th><th scope="col" class="n">Output</th></tr>
+            </thead>
+            <tbody>
+              <tr class="win"><td>AVIF crf20</td><td>1024px</td><td class="n">3.7 MB</td></tr>
+              <tr><td>AVIF crf26</td><td>2160px</td><td class="n">8.4 MB</td></tr>
+              <tr><td>AVIF crf20</td><td>2160px</td><td class="n">12.2 MB</td></tr>
+              <tr><td>AVIF crf14</td><td>2160px</td><td class="n">18.8 MB</td></tr>
+              <tr><td>WebP q92</td><td>2160px</td><td class="n">88.3 MB</td></tr>
+              <tr><td>GIF</td><td>1000px</td><td class="n">~128 MB</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout">
+          <b>The encode can go to the GPU.</b> On Windows with an AMD card it does by default —
+          AMF produces AVIF that Discord renders, measured faster and smaller than the CPU encoder.
+          On Linux it deliberately doesn't: the same silicon through VAAPI produces files Chromium
+          refuses to decode, and Discord is Chromium.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ get it ============ -->
+  <section id="get">
+    <div class="wrap split">
+      <div>
+        <div class="section-head">
+          <p class="eyebrow">Download</p>
+          <h2>Get it running.</h2>
+          <p class="lede" style="font-size:var(--step-0)">
+            It runs from source on Node — there's nothing to compile and no dependencies to install.
+            Setup is mostly telling Discord who you are.
+          </p>
+        </div>
+
+        <div class="cta-row" style="margin-top:0">
+          <a class="btn btn-primary" href="https://github.com/OoEthanoO/yanpresence/archive/refs/heads/main.zip">Download .zip</a>
+          <a class="btn btn-ghost" href="https://github.com/OoEthanoO/yanpresence" target="_blank" rel="noopener">Browse the source</a>
+        </div>
+
+        <h3 style="font-size:var(--step-1);margin-top:2.6rem;margin-bottom:0.9rem">Requirements</h3>
+        <ul class="reqs">
+          <li><b>Node.js 18+</b> — the whole thing is plain JavaScript with zero npm dependencies.</li>
+          <li><b>The Discord desktop app</b>, running. The web client has no local IPC socket to speak to.</li>
+          <li><b>A Discord application</b> of your own, named <code>Apple Music</code> — Discord builds the "Listening to…" header from the application's name, so it has to be yours.</li>
+          <li><b>ffmpeg</b>, only if you want animated artwork. The static path needs nothing extra.</li>
+        </ul>
+      </div>
+
+      <div>
+        <div class="tabs" role="tablist" aria-label="Platform">
+          <button role="tab" aria-selected="true" data-os="mac">macOS</button>
+          <button role="tab" aria-selected="false" data-os="win">Windows</button>
+          <button role="tab" aria-selected="false" data-os="linux">Linux</button>
+        </div>
+
+        <div class="steps" id="steps"></div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap fin">
+    <span>yanpresence — MIT licensed.</span>
+    <a href="https://github.com/OoEthanoO/yanpresence" target="_blank" rel="noopener">github.com/OoEthanoO/yanpresence</a>
+    <span style="margin-left:auto">Not affiliated with Apple or Discord.</span>
+  </div>
+</footer>
+
+<script>
+  /* ---- the hero card, which actually plays ---- */
+  const CARDS = {
+    music: {
+      head: 'Listening to Apple Music',
+      title: 'Be Her',
+      sub: 'Ella Langley',
+      status: 'Listening to <b>Be Her</b>',
+      start: 64,
+      length: 191,
+    },
+    tv: {
+      head: 'Watching Apple TV',
+      title: 'Ted Lasso',
+      sub: 'S2E8 · Man City',
+      status: 'Watching <b>Ted Lasso</b>',
+      start: 812,
+      length: 2872,
+    },
+  };
+
+  const el = {
+    head: document.getElementById('c-head'),
+    title: document.getElementById('c-title'),
+    sub: document.getElementById('c-sub'),
+    bar: document.getElementById('c-bar'),
+    time: document.getElementById('c-time'),
+    status: document.getElementById('c-status'),
+    card: document.getElementById('card'),
+  };
+
+  let current = 'music';
+  let elapsed = 0;
+  let since = performance.now();
+
+  const mmss = (s) => {
+    const m = Math.floor(s / 60);
+    return m + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+  };
+
+  function paint() {
+    const c = CARDS[current];
+    const at = Math.min(c.start + elapsed, c.length);
+    el.bar.style.width = ((at / c.length) * 100).toFixed(2) + '%';
+    el.time.textContent = mmss(at);
+  }
+
+  function select(which) {
+    current = which;
+    elapsed = 0;
+    since = performance.now();
+    const c = CARDS[which];
+    el.head.textContent = c.head;
+    el.title.textContent = c.title;
+    el.sub.textContent = c.sub;
+    el.status.innerHTML = c.status;
+    el.card.setAttribute('aria-labelledby', which === 'music' ? 'tab-music' : 'tab-tv');
+    document.getElementById('tab-music').setAttribute('aria-selected', String(which === 'music'));
+    document.getElementById('tab-tv').setAttribute('aria-selected', String(which === 'tv'));
+    paint();
+  }
+
+  document.getElementById('tab-music').addEventListener('click', () => select('music'));
+  document.getElementById('tab-tv').addEventListener('click', () => select('tv'));
+
+  const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (!still) {
+    setInterval(() => {
+      elapsed = (performance.now() - since) / 1000;
+      paint();
+    }, 1000);
+  }
+  paint();
+
+  /* ---- install steps, per platform ---- */
+  const CLONE = 'git clone https://github.com/OoEthanoO/yanpresence.git\ncd yanpresence';
+
+  const STEPS = {
+    mac: [
+      ['Get the source', 'Nothing to install past this — there are no dependencies.', CLONE],
+      ['Create a Discord application', 'At discord.com/developers, named <b>Apple Music</b>. Copy its Application ID. Under Rich Presence → Art Assets, upload <code>assets/blank.png</code> named <code>blank</code>.', null],
+      ['Write a config and paste the ID in', 'Lands in <code>~/Library/Application Support/yanpresence/</code>.', 'node bin/yanpresence.js --init'],
+      ['Check the setup', 'Verifies Music.app, Discord, the catalog lookup and the artwork toolchain. First run asks macOS for permission to control Music.', 'node bin/yanpresence.js --doctor'],
+      ['Run it', 'Or <code>npm run install-agent</code> to start it at login.', 'node bin/yanpresence.js'],
+    ],
+    win: [
+      ['Get the source', 'Nothing to install past this — there are no dependencies.', CLONE],
+      ['Create a Discord application', 'At discord.com/developers, named <b>Apple Music</b>. Copy its Application ID. Under Rich Presence → Art Assets, upload <code>assets/blank.png</code> named <code>blank</code>.', null],
+      ['Write a config and paste the ID in', 'Lands in <code>%APPDATA%\\yanpresence\\</code>.', 'node bin/yanpresence.js --init'],
+      ['Check the setup', 'Verifies both Apple apps, the Discord pipe, and which GPU will encode your artwork.', 'node bin/yanpresence.js --doctor'],
+      ['Add it to the Start menu', 'Then press Start and type <b>yanpresence</b>. It runs without a window — quit it from the notification-area icon. Add <code>-- -Startup</code> to also run it at login.', 'npm run install-windows'],
+    ],
+    linux: [
+      ['Get the source', 'Nothing to install past this — there are no dependencies.', CLONE],
+      ['Create a Discord application', 'At discord.com/developers, named <b>Apple Music</b>. Copy its Application ID. Under Rich Presence → Art Assets, upload <code>assets/blank.png</code> named <code>blank</code>.', null],
+      ['Write a config and paste the ID in', 'Lands in <code>~/.config/yanpresence/</code>.', 'node bin/yanpresence.js --init'],
+      ['Install the browser extension', 'Only needed for Chrome, which publishes no page URL over MPRIS. <code>chrome://extensions</code> → Developer mode → Load unpacked → the <code>browser/</code> directory. Firefox needs nothing.', null],
+      ['Run it', 'Or <code>npm run install-service</code> for a systemd user unit.', 'node bin/yanpresence.js'],
+    ],
+  };
+
+  const stepsHost = document.getElementById('steps');
+
+  function renderSteps(os) {
+    stepsHost.innerHTML = '';
+    for (const [heading, blurb, cmd] of STEPS[os]) {
+      const wrap = document.createElement('div');
+      wrap.className = 'step';
+
+      const h = document.createElement('h4');
+      h.textContent = heading;
+      wrap.appendChild(h);
+
+      const p = document.createElement('p');
+      p.innerHTML = blurb;
+      wrap.appendChild(p);
+
+      if (cmd) {
+        const box = document.createElement('div');
+        box.className = 'snippet';
+        const pre = document.createElement('pre');
+        pre.textContent = cmd;
+        box.appendChild(pre);
+
+        const btn = document.createElement('button');
+        btn.className = 'copy';
+        btn.type = 'button';
+        btn.textContent = 'copy';
+        btn.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(cmd);
+            btn.textContent = 'copied';
+            btn.dataset.done = '1';
+            setTimeout(() => { btn.textContent = 'copy'; delete btn.dataset.done; }, 1600);
+          } catch {
+            btn.textContent = 'select it';
+          }
+        });
+        box.appendChild(btn);
+        wrap.appendChild(box);
+      }
+      stepsHost.appendChild(wrap);
+    }
+  }
+
+  const osTabs = [...document.querySelectorAll('.tabs button')];
+  osTabs.forEach((b) => {
+    b.addEventListener('click', () => {
+      osTabs.forEach((o) => o.setAttribute('aria-selected', String(o === b)));
+      renderSteps(b.dataset.os);
+    });
+  });
+
+  // Open on whatever the visitor is most likely running.
+  const guess = navigator.userAgent.includes('Win') ? 'win'
+    : navigator.userAgent.includes('Mac') ? 'mac'
+    : navigator.userAgent.includes('Linux') ? 'linux' : 'mac';
+  osTabs.forEach((o) => o.setAttribute('aria-selected', String(o.dataset.os === guess)));
+  renderSteps(guess);
+</script>
