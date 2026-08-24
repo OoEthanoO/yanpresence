@@ -176,10 +176,26 @@ export const DEFAULTS = {
     // Which apps to read. Prefixes of the AUMID each publishes its media
     // session under; only override these if Apple ships the apps under a
     // different package identity than the ones in the Store today.
+    //
+    // `tv` is consulted but has never been answered: the Apple TV app
+    // publishes no media session at all. It is kept so that --smtc keeps
+    // reporting on it, and so a future version of the app that does publish
+    // one is noticed rather than missed.
     appIds: {
       music: 'AppleInc.AppleMusicWin',
       tv: 'AppleInc.AppleTVWin',
     },
+
+    // Read the Apple TV app through UI Automation, which is the only way it
+    // can be read at all -- see src/uia.js. It reports whenever the app's
+    // playback controls are on screen, and carries the last reading forward
+    // with the playhead advancing while they are not.
+    //
+    // Turn it off to leave the app alone entirely: `tv.enabled` then governs
+    // nothing on Windows. Worth doing only if a future version of the app
+    // rearranges its UI badly enough to make the readings wrong, since a wrong
+    // card is worse than no card.
+    tvUiAutomation: true,
   },
 
   // Apple TV, through TV.app on macOS and the Apple TV app on Windows. On

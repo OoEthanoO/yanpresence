@@ -334,9 +334,13 @@ export async function dumpCurrentArtwork({ appId = APPLE_MUSIC_APP_ID } = {}) {
 /**
  * Every Apple media session Windows currently knows about, raw.
  *
- * Only used by `--smtc`, which exists because the mapping from these fields to
- * a show, a season and an episode is read out of free text (see parseEpisode)
- * and the only way to check it is to see what the app actually published.
+ * Used by `--smtc` and by `--doctor`. Worth having as its own thing because
+ * the Apple Music app packs two fields into one (see splitArtistAlbum) and the
+ * only way to check that reading is to see what was actually published.
+ *
+ * The `tv` channel is asked for on purpose even though the Apple TV app has
+ * never been seen to answer: reporting "no session" is the finding, and if a
+ * future version of the app starts publishing one this is where it shows up.
  */
 export function readSessionsOnce({ timeoutMs = 15000, appIds = {} } = {}) {
   return new Promise((resolve, reject) => {

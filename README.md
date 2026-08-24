@@ -3,7 +3,7 @@
 Apple Music → Discord Rich Presence, for macOS, Windows and Linux.
 
 Watches the **Music** app over Apple Events on macOS, the **Apple Music** and
-**Apple TV** apps over the media session on Windows, and the **web players** at
+**Apple TV** apps on Windows, and the **web players** at
 `music.apple.com` and `tv.apple.com` on Linux, and mirrors what you're playing
 into Discord — laid out like Discord's own Spotify integration, with the song
 name on your status line instead of the artist, full-size album art, and the
@@ -32,9 +32,10 @@ And expanded, when someone clicks into your profile:
 ## What it does
 
 - **Three ways in, one pipeline.** On macOS, playback state comes from Apple
-  Events sent to `Music.app` and `TV.app`. On Windows, it comes from the System
-  Media Transport Controls session the Apple Music and Apple TV apps publish —
-  the record behind the flyout over the volume overlay. On Linux, it comes from
+  Events sent to `Music.app` and `TV.app`. On Windows, Apple Music publishes a
+  System Media Transport Controls session — the record behind the flyout over
+  the volume overlay — while Apple TV publishes nothing at all and is read off
+  its own UI Automation tree. On Linux, it comes from
   the Apple Music web player in your browser — over a companion extension, over
   MPRIS on the session bus, or both. Everything past that point (catalog
   lookups, links, artwork, the card itself) is identical, because the sources
@@ -133,8 +134,9 @@ On Linux, also install the browser extension if you use Chrome:
 node bin/yanpresence.js --doctor
 ```
 
-This verifies the playback source — Music.app on macOS, the two media sessions
-on Windows, the extension bridge and every MPRIS player on Linux — plus the
+This verifies the playback source — Music.app on macOS, the Apple Music media
+session and the Apple TV player's UI on Windows, the extension bridge and every
+MPRIS player on Linux — plus the
 Discord IPC socket (a named pipe on Windows), the Apple Music catalog lookup,
 and the animated-artwork toolchain, and tells you exactly what's missing.
 
@@ -507,7 +509,8 @@ Cache and encoded artwork go beside it on macOS, and under
 | `statusDisplay` | `"details"` | Which field lands on your status line: `details` (song), `state` (artist, Spotify's choice), `name`. |
 | `windows.tray` | `false` | Windows: show a notification-area icon with a Quit item. The Start menu shortcut passes `--tray` itself. See [Windows](#windows). |
 | `windows.appIds.music` | `"AppleInc.AppleMusicWin"` | Windows: AUMID prefix of the app whose media session is Apple Music. |
-| `windows.appIds.tv` | `"AppleInc.AppleTVWin"` | Windows: the same, for Apple TV. |
+| `windows.appIds.tv` | `"AppleInc.AppleTVWin"` | Windows: the same, for Apple TV — which has never answered, since that app publishes no session. Kept so a future version that does is noticed. |
+| `windows.tvUiAutomation` | `true` | Windows: read the Apple TV app through UI Automation, the only way it can be read. See [Apple TV on Windows](#apple-tv-on-windows). |
 | `artworkSize` | `1024` | Square px requested from Apple's CDN. |
 | `showSmallImage` | `true` | Small corner badge. |
 | `smallImageKey` | `"applemusic"` | Name of the Art Asset uploaded in the portal. |
@@ -771,30 +774,61 @@ collide.
 
 ### Apple TV on Windows
 
-Works, with one caveat worth knowing about. On macOS, TV.app answers `show`,
-`season number` and `episode number` as properties. A media session has no such
-fields — it has the same three free-text strings a music player publishes — so
-the show, the episode and its numbering are **read out of that text**:
-`S2E7`, `Season 2, Episode 7`, and `2x07` are all understood, wherever among
-the fields they appear, and the field that carried the numbering is cleaned up
-rather than shown with it trailing off the end.
+The Apple TV app publishes **no media session at all**. Not an empty one, not
+one that appears when playback starts — none, ever. Verified over 150 seconds
+of continuous playback, during which Apple Music, sitting *paused* in the
+background, published one the entire time:
 
-Which slot Apple puts what in is Apple's business and has moved before, so
-neither is assumed — the show is whichever field is not the numbering. To see
-both what arrived and what was made of it:
-
-```bash
-node bin/yanpresence.js --smtc
+```
+t=  0s  sessions=1  appleTV=no  [AppleInc.AppleMusicWin_nzyj5cx40ttqa!App]
+t=  2s  sessions=1  appleTV=no  [AppleInc.AppleMusicWin_nzyj5cx40ttqa!App]
+...
+NO APPLE TV MEDIA SESSION appeared in 150s.
 ```
 
-`--doctor` prints the same comparison when something is playing. If a future
-version of the app rearranges its fields, that is the one command that shows it
-rather than leaving you guessing at a wrong-looking card.
+So it is read off its own **UI Automation** tree instead, which turns out to be
+richer than a media session would have been. Where the Apple Music app packs
+two fields into one and leaves the album empty, the player's UI hands over the
+season, the episode number and the episode title as separate labelled elements,
+and the scrubber reports the playhead and the runtime in seconds:
 
-Also unlike Apple Music, the Apple TV app registers **no session until it plays
-something** — an open, idle Apple TV app is indistinguishable from a closed
-one. That costs nothing but is why `--doctor` words its "not running" line the
-way it does.
+```
+Text   'Trying'                    id=TitleTextBlock
+Text   'S1, E1 · Nikki and Jason'  id=SubtitleTextBlock
+Slider 'Playback position'         id=VideoPlayer_CurrentPositionScrubber  RANGE[810.2/1867.3]
+Button 'Pause'                     id=VideoPlayer_PlayButton
+```
+
+The play button is labelled with the action it offers, so "Pause" is a playing
+video and "Play" is a paused one — which is how pause is detected without a
+session to ask.
+
+**The catch, and it is a real one:** those elements exist only while the
+transport overlay is on screen. Let it fade and the subtree is not stale, it is
+*gone*. So the watcher reports `hidden` as its own state and the last real
+reading is carried forward with the playhead advancing, the same way the Apple
+Music playhead is advanced between the app's own timeline updates.
+
+That works because of *when* the overlay comes back: starting something,
+pausing, scrubbing — the events worth noticing are the events that redraw it.
+A carried-forward reading is dropped once it runs past the end of the episode,
+or after four hours, whichever comes first.
+
+The one case it gets wrong: pausing from the keyboard alone, with the pointer
+never moving, reads as still-playing until something redraws the overlay.
+
+To see both what was read and what was made of it:
+
+```bash
+node bin/yanpresence.js --doctor
+```
+
+With the controls on screen that prints the elements next to the parsed show,
+episode and numbering. With them hidden it says so, rather than pretending the
+app is not running. If a future version of the app renames those
+AutomationIds, that is the command that shows it instead of leaving you
+guessing at a card that never appears — and `windows.tvUiAutomation: false`
+turns the whole thing off if it ever starts reading things wrongly.
 
 ## Linux and the web player
 
@@ -902,8 +936,10 @@ npm test
 Node's built-in runner, no dependencies. Covers the activity payload's
 constraints (the `status_display_type` mapping, length caps, the never-empty
 image slot), artwork cache invalidation, the watcher's watchdog, the Windows
-media session's normalizers — including reading a season and an episode out of
-the free text the Apple TV app publishes — and the Linux path end to end: MPRIS
+media session's normalizers — including unpicking the album from the artist
+field the Apple Music app packs them both into — the Apple TV reader's parsing
+and its carry-forward when the player's controls are off screen, the tray
+icon's protocol, and the Linux path end to end: MPRIS
 parsing and classification against real captured `busctl` replies, the bridge's
 HTTP contract, the extension's own scripts run against stubbed browser APIs,
 and GPU encoder selection on both the VAAPI and AMF paths, including the
@@ -928,10 +964,10 @@ Music.app ──Apple Events──> scripts/music-watch.js  (resident osascript,
                               src/music.js     ────┐  normalize, watchdog, respawn
                                                    │
 Windows:                                           │
-Apple Music ─┐                                     │
-             ├─media session─> scripts/smtc-watch.ps1  (resident PowerShell, WinRT)
-Apple TV ────┘                       │             │
-                              src/smtc.js      ────┤  normalize, split into channels
+Apple Music ──media session──> scripts/smtc-watch.ps1   (resident PowerShell, WinRT)
+                              src/smtc.js      ────┤  normalize, unpick artist/album
+Apple TV ─────UI Automation──> scripts/tv-uia-watch.ps1 (resident PowerShell, UIA)
+                              src/uia.js       ────┤  normalize, carry the gaps
                                                    │
 Linux:                                             │
 music.apple.com ──extension──> src/bridge.js   ────┤  loopback HTTP, reads MusicKit
@@ -976,10 +1012,13 @@ A few decisions worth calling out:
   The one thing that genuinely differs is identification: an Apple Event can
   only have come from Music.app, while a browser tab has to prove which site it
   is — see [Linux and the web player](#linux-and-the-web-player).
-- **The Windows apps are read without being touched.** They are packaged Store
-  apps with no automation surface, so there is nothing to script even if we
-  wanted to. The media session they publish is the same record the volume
-  flyout and your keyboard's play key already use.
+- **The two Windows apps have nothing in common but their vendor.** Apple Music
+  publishes a media session — the same record the volume flyout and your
+  keyboard's play key already use — and packs the artist and the album into one
+  field of it. Apple TV publishes no session at all and has to be read off its
+  own UI, which only exists while its controls are on screen. Both end up
+  producing the snapshots macOS produces, which is the only reason two
+  mechanisms this unalike can sit behind one source.
 - **GPU work is verified, not assumed** — and then measured, which is how VAAPI
   turned out to produce files Discord cannot render at all while AMF, on the
   same silicon, produces files it renders fine. Both facts came from checking,

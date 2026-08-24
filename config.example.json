@@ -72,9 +72,17 @@
   // appIds: prefixes of the identifiers the two Store apps publish their media
   //   sessions under. Only worth touching if Apple reissues them under a
   //   different package identity; `yanpresence --smtc` shows what is actually
-  //   being published.
+  //   being published. The "tv" one has never been answered — that app
+  //   publishes no session at all — and is kept so a future version that does
+  //   is noticed rather than missed.
+  //
+  // tvUiAutomation: read the Apple TV app through UI Automation, which is the
+  //   only way it can be read. It reports whenever the app's playback controls
+  //   are on screen and carries the last reading forward in between. Turn it
+  //   off to leave the app alone entirely.
   "windows": {
     "tray": false,
+    "tvUiAutomation": true,
     "appIds": {
       "music": "AppleInc.AppleMusicWin",
       "tv": "AppleInc.AppleTVWin"

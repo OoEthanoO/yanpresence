@@ -8,6 +8,7 @@ import { MprisSource } from './mpris.js';
 import { MusicWatcher, dumpCurrentArtwork, isCatalogTrack } from './music.js';
 import { SmtcWatcher, dumpCurrentArtwork as dumpSmtcArtwork } from './smtc.js';
 import { TvWatcher } from './tv.js';
+import { TvUiaWatcher } from './uia.js';
 import log from './log.js';
 
 // How long the extension gets to introduce itself before MPRIS starts
@@ -109,55 +110,50 @@ class AppleAppSources {
 /* ------------------------------------------------------------------ */
 
 /**
- * The Apple Music and Apple TV apps on Windows, over the media session.
+ * The Apple Music and Apple TV apps on Windows.
  *
  * Apple ships both as packaged Store apps with no automation surface -- there
  * is no Windows equivalent of the iTunes scripting dictionary, and nothing to
- * send an Apple Event to. What they do publish is a System Media Transport
- * Controls session each: the record behind the flyout that appears over the
- * volume overlay, carrying title, artist, album, playback status and a
- * timeline. That is every field the presence card is built from, and it is
- * read without injecting anything into either app.
+ * send an Apple Event to. Past that the two have nothing in common, which is
+ * why they are read two different ways:
  *
- * One watcher process serves both apps, because on Windows they are two
- * entries in one list of sessions rather than two applications to be scripted
- * separately. It is split back into channels here, so that everything
- * downstream sees the same two independent sources macOS presents.
+ *   Apple Music  publishes a System Media Transport Controls session -- the
+ *                record behind the flyout over the volume overlay, carrying
+ *                title, artist, playback status and a timeline.
+ *   Apple TV     publishes no session at all, verified over minutes of
+ *                continuous playback, so it is read off its own UI Automation
+ *                tree instead. See src/uia.js.
+ *
+ * Both hand back the snapshots macOS produces, so nothing downstream knows the
+ * difference -- which is the only reason two mechanisms this unalike can sit
+ * behind one source.
  */
 class WindowsAppSources {
   constructor(config) {
     this.kind = 'apple-apps';
     this.config = config;
 
-    this.tvEnabled = Boolean(config.tv?.enabled);
-    this.watcher = new SmtcWatcher({
+    // Two apps, two entirely different ways in -- which is not a design, it is
+    // what Apple left us. Apple Music publishes a media session; Apple TV
+    // publishes nothing at all and has to be read off its own UI.
+    this.music = new SmtcWatcher({
       pollIntervalMs: config.pollIntervalMs,
       idlePollIntervalMs: config.idlePollIntervalMs,
-      tv: this.tvEnabled,
       appIds: config.windows?.appIds ?? {},
     });
 
-    this.started = 0;
-    this.music = new Channel(
-      () => this.begin(),
-      () => this.end()
-    );
+    this.tvEnabled = Boolean(config.tv?.enabled && config.windows?.tvUiAutomation !== false);
     this.tv = this.tvEnabled
-      ? new Channel(
-          () => this.begin(),
-          () => this.end()
-        )
+      ? new TvUiaWatcher({
+          pollIntervalMs: config.pollIntervalMs,
+          idlePollIntervalMs: config.idlePollIntervalMs,
+        })
       : null;
-
-    this.watcher.on('state', (snapshot) => {
-      const channel = snapshot.channel === 'tv' ? this.tv : this.music;
-      channel?.emit('state', snapshot);
-    });
   }
 
   describe() {
     return this.tv
-      ? 'Watching the Apple Music and Apple TV apps over the Windows media session'
+      ? 'Watching the Apple Music app over the Windows media session, and the Apple TV app over UI Automation'
       : 'Watching the Apple Music app over the Windows media session';
   }
 
@@ -185,16 +181,6 @@ class WindowsAppSources {
   async localArtworkFor(track) {
     if (!track.hasArtwork) return null;
     return dumpSmtcArtwork({ appId: track.origin });
-  }
-
-  begin() {
-    if (this.started++ > 0) return;
-    this.watcher.start();
-  }
-
-  end() {
-    if (--this.started > 0) return;
-    this.watcher.stop();
   }
 }
 

@@ -516,53 +516,94 @@ async function doctorWindowsApps(config, rows) {
   }
 
   const music = sessions.find((s) => s.channel === 'music');
-  const tv = sessions.find((s) => s.channel === 'tv');
 
-  const report = (label, reading, appId, hint) => {
-    if (!reading || reading.state === 'closed') {
-      warn(
-        label,
-        `not running (that is fine — start it and presence will follow).\n` +
-          `      Looking for a media session from ${appId}.${hint ? `\n      ${hint}` : ''}`
-      );
-    } else if (reading.state === 'playing' || reading.state === 'paused') {
-      ok(label, `${reading.state}: ${[reading.name, reading.artist].filter(Boolean).join(' — ')}`);
-    } else {
-      ok(label, `running, nothing loaded (player state "${reading.state}")`);
-    }
-  };
+  if (!music || music.state === 'closed') {
+    warn(
+      'Apple Music',
+      `not running (that is fine — start it and presence will follow).\n` +
+        `      Looking for a media session from ${appIds.music}.`
+    );
+  } else if (music.state === 'playing' || music.state === 'paused') {
+    ok('Apple Music', `${music.state}: ${[music.name, music.artist].filter(Boolean).join(' — ')}`);
+  } else {
+    ok('Apple Music', `running, nothing loaded (player state "${music.state}")`);
+  }
 
-  report('Apple Music', music, appIds.music);
   if (!config.tv?.enabled) {
     rows.push(['info', 'Apple TV', 'disabled in config (set tv.enabled to true)']);
     return;
   }
-  report(
-    'Apple TV',
-    tv,
-    appIds.tv,
-    'The app registers one only once something is playing, unlike Apple Music.'
-  );
-
-  const { normalizeTv } = await import('../src/smtc.js');
-  const snapshot = tv ? normalizeTv(tv) : null;
-
-  if (snapshot?.active) {
-    // On macOS the show, the season and the episode are properties TV.app
-    // answers. Here they are read out of whatever free text the app happened
-    // to publish (see parseEpisode), so both sides of that reading are shown:
-    // getting it wrong is otherwise indistinguishable from getting it right.
-    rows.push([
-      'info',
-      'Apple TV fields',
-      `title="${tv.name}" artist="${tv.artist}" album="${tv.album}" subtitle="${tv.subtitle ?? ''}"\n` +
-        `      → show="${snapshot.item.show}" episode="${snapshot.item.name}" ` +
-        `${episodeCode(snapshot.item) || '(no numbering)'}`,
-    ]);
+  if (config.windows?.tvUiAutomation === false) {
+    rows.push(['info', 'Apple TV', 'windows.tvUiAutomation is false, so the app is not read']);
+    return;
   }
 
-  await doctorTvArtwork(config, snapshot, rows);
+  await doctorWindowsTv(config, rows);
   doctorTvHeader(config, rows);
+}
+
+/**
+ * Apple TV on Windows, over UI Automation.
+ *
+ * Checked apart from Apple Music because it fails apart from it, and for
+ * entirely different reasons. There is no media session to look for — the app
+ * publishes none — so what can go wrong is that the player's own UI elements
+ * are not where they were, and the only symptom of that is a card that never
+ * appears.
+ */
+async function doctorWindowsTv(config, rows) {
+  const { readTvOnce, toItem } = await import('../src/uia.js');
+
+  let reading;
+  try {
+    reading = await readTvOnce();
+  } catch (err) {
+    rows.push(['fail', 'Apple TV', `could not read the app's UI: ${err.message}`]);
+    return;
+  }
+
+  if (!reading || reading.state === 'closed') {
+    rows.push([
+      'warn',
+      'Apple TV',
+      'not running (that is fine — start it and presence will follow).\n' +
+        '      Read over UI Automation: this app publishes no media session at all,\n' +
+        '      unlike Apple Music. See the README section "Apple TV on Windows".',
+    ]);
+    return;
+  }
+
+  if (reading.state === 'error') {
+    rows.push(['fail', 'Apple TV', `the watcher reported: ${reading.error}`]);
+    return;
+  }
+
+  if (reading.state === 'hidden') {
+    rows.push([
+      'warn',
+      'Apple TV',
+      'running, but its playback controls are not on screen, so there is nothing to\n' +
+        '      read right now. That is normal — the overlay fades seconds after you touch\n' +
+        '      anything. Move the mouse over the player and run this again.',
+    ]);
+    return;
+  }
+
+  const item = toItem(reading);
+  rows.push(['ok', 'Apple TV', `${reading.state}: ${[item.show, item.name].filter(Boolean).join(' — ')}`]);
+
+  // Both sides of the reading, because these elements are Apple's and could be
+  // rearranged by any update — a wrong mapping is otherwise indistinguishable
+  // from a right one until the card looks odd.
+  rows.push([
+    'info',
+    'Apple TV fields',
+    `title="${reading.show}" subtitle="${reading.subtitle ?? ''}"\n` +
+      `      → show="${item.show}" episode="${item.name}" ${episodeCode(item) || '(no numbering)'} ` +
+      `${item.position.toFixed(0)}/${item.duration.toFixed(0)}s`,
+  ]);
+
+  await doctorTvArtwork(config, { active: true, item }, rows);
 }
 
 /**
@@ -702,7 +743,7 @@ async function cmdDoctor(config) {
     resolveSourceKind(config) === 'browser'
       ? 'browser — music.apple.com and tv.apple.com'
       : process.platform === 'win32'
-        ? 'apple-apps — the Apple Music and Apple TV apps, over the Windows media session'
+        ? 'apple-apps — Apple Music over the media session, Apple TV over UI Automation'
         : 'apple-apps — Music.app and TV.app'
   );
 
@@ -883,7 +924,26 @@ async function cmdDoctor(config) {
   console.log('');
 
   const failed = rows.some(([level]) => level === 'fail');
-  process.exit(failed ? 1 : 0);
+  quit(failed ? 1 : 0);
+}
+
+/**
+ * Exits with a code, without pulling the process out from under itself.
+ *
+ * `process.exit()` here trips a libuv assertion on Windows -- async.c:94,
+ * `!(handle->flags & UV_HANDLE_CLOSING)` -- when it runs while a socket from
+ * one of the checks above is still closing. Every one of these paths has just
+ * done network work, so that is most of the time, and it prints a frightening
+ * line after an otherwise clean report.
+ *
+ * Letting the loop drain instead costs nothing measurable (a quarter of a
+ * second, most of which is the report itself), and the timer is a backstop for
+ * the case where something genuinely forgot to release a handle: unref'd, so
+ * it cannot itself be the reason the process stays up.
+ */
+function quit(code) {
+  process.exitCode = code;
+  setTimeout(() => process.exit(code), 5000).unref?.();
 }
 
 /**
@@ -925,7 +985,12 @@ async function cmdSmtc(config) {
   for (const session of sessions) {
     console.log(`  [${session.channel}] ${session.state}`);
     if (session.state === 'closed') {
-      console.log('      no session — the app is not running\n');
+      console.log(
+        session.channel === 'tv'
+          ? '      no session. The Apple TV app publishes none even while playing —\n' +
+              '      it is read over UI Automation instead. See --doctor.\n'
+          : '      no session — the app is not running\n'
+      );
       continue;
     }
     if (session.state === 'error') {
@@ -1139,7 +1204,9 @@ async function main() {
     tray?.stop();
     instanceLock?.close();
     await app.shutdown();
-    process.exit(0);
+    // Same reason as --doctor: an artwork fetch may still be unwinding, and
+    // exiting through it is what produces the assertion.
+    quit(0);
   };
 
   if (wantsTray) {
