@@ -992,19 +992,26 @@ async function showFatalDialog(message, logFile) {
 }
 
 function claimSingleInstance() {
-  if (process.platform !== 'win32') return null;
+  if (process.platform !== 'win32') return Promise.resolve(null);
 
-  const server = net.createServer();
-  server.on('error', () => {
-    console.error(
-      'yanpresence is already running. Quit it from the notification-area icon first,\n' +
-        'or end the existing node process, then start this one.'
-    );
-    process.exit(1);
+  // Awaited rather than fired and forgotten: listen() reports failure on a
+  // later tick, so a caller that carries straight on has already spawned the
+  // watcher and connected to Discord by the time it learns it lost the race --
+  // and briefly overwritten the presence of the copy that won.
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => {
+      console.error(
+        'yanpresence is already running. Quit it from the notification-area icon first,\n' +
+          'or end the existing node process, then start this one.'
+      );
+      process.exit(1);
+    });
+    server.listen(SINGLE_INSTANCE_PIPE, () => {
+      server.unref();
+      resolve(server);
+    });
   });
-  server.listen(SINGLE_INSTANCE_PIPE);
-  server.unref();
-  return server;
 }
 
 async function cmdWatch(config) {
@@ -1088,18 +1095,38 @@ async function main() {
     const problems = validateConfig(config);
     if (problems.length) {
       for (const problem of problems) log.error(problem);
-      const hint = 'Run `yanpresence --init` to create a config, then `yanpresence --doctor` to verify it.';
-      log.error(hint);
+      log.error('Run `yanpresence --init` to create a config, then `yanpresence --doctor` to verify it.');
       // Launched from the Start menu there is no console and no exit code
       // anyone will ever see, so "nothing happened" is the whole error
-      // message. Say it somewhere it can actually be read.
-      if (wantsTray) await showFatalDialog([...problems, '', hint].join('\n\n'), logFile);
+      // message. Say it somewhere it can actually be read -- and say it with
+      // the config's actual path and a command that can be pasted as-is,
+      // because `yanpresence` is only on PATH after an npm link and someone
+      // reading this dialog has no shell open to find that out in.
+      if (wantsTray) {
+        await showFatalDialog(
+          [
+            ...problems,
+            '',
+            config.__source
+              ? `Config read from:\n${config.__source}`
+              : // Named directly rather than picked out of configPaths() by
+                // index, whose first entry is the YANPRESENCE_CONFIG override
+                // only when that is set.
+                `No config was found. Expected one at:\n${path.join(SUPPORT_DIR, 'config.json')}`,
+            '',
+            'To create one, open a terminal in the yanpresence folder and run:\n' +
+              'node bin/yanpresence.js --init\n\n' +
+              'then check it with:\nnode bin/yanpresence.js --doctor',
+          ].join('\n\n'),
+          logFile
+        );
+      }
       process.exit(1);
     }
   }
 
   // Held for the lifetime of the process; released by Windows on exit.
-  const instanceLock = wantsTray ? claimSingleInstance() : null;
+  const instanceLock = wantsTray ? await claimSingleInstance() : null;
 
   const app = new YanPresence(config, { dryRun: Boolean(flags.dryRun) });
 
