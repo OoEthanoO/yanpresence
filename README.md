@@ -49,9 +49,9 @@ And expanded, when someone clicks into your profile:
 
   The expanded card's header is a separate thing, and it always comes from the
   application's name — Discord's docs are explicit that *"you can't set App Name
-  when setting presence"*. That's why step 1 of setup is naming the application
-  `Apple Music`: the header reads "Listening to Apple Music" while the status
-  line reads the song.
+  when setting presence"*. The shared application is already named
+  `Apple Music`, so the header reads "Listening to Apple Music" while the
+  status line reads the song. No Developer Portal setup is needed.
 - **1024×1024 album art**, pulled from Apple's artwork CDN at full square size —
   the asset size Discord's own docs recommend.
 - **Animated album art** where Apple has published motion artwork — the *full*
@@ -66,6 +66,45 @@ And expanded, when someone clicks into your profile:
   up instead.
 - Survives Discord restarts, Music.app restarts, and sleep/wake.
 
+## Install on Windows
+
+[**Download the installer**](https://github.com/OoEthanoO/yanpresence/releases/latest/download/yanpresence-windows-x64-setup.exe)
+(also on [the website](https://yanpresence.vercel.app/#get)), run it, and
+finish the installer. It is not code-signed yet, so Windows SmartScreen may
+warn you: choose **More info → Run anyway**. It
+includes Node.js, ffmpeg and ffprobe, installs for your Windows user without
+administrator access, adds yanpresence to the Start menu, and starts it at login
+by default. Leave **Launch yanpresence** checked on the final screen to start
+immediately.
+
+Open the Discord desktop app and play something in Apple Music or Apple TV.
+yanpresence runs in the notification area; right-click its icon to open the log
+or quit. You do not need a terminal, a Discord application, a cloud account,
+storage credentials, or a config file.
+
+Every installer is on [GitHub releases](https://github.com/OoEthanoO/yanpresence/releases),
+under two names with identical bytes: `yanpresence-<version>-windows-x64-setup.exe`,
+and `yanpresence-windows-x64-setup.exe`, the version-less name the download link
+above and the website point at. You can also build it yourself; see
+[Build the Windows installer](#build-the-windows-installer) below.
+
+### Shared services are ready to use
+
+Fresh installs use the existing **Apple Music** and **Apple TV** Discord
+applications and shared artwork storage. Application IDs are public identifiers;
+no Discord login, bot token, or bucket key is distributed with the app.
+
+Animated covers and embedded covers from local music files are uploaded through
+an image-only gateway to the project's shared bucket. **Uploaded artwork is
+public to anyone with its URL.** The gateway accepts artwork up to **25 MiB**
+and applies upload rate limits. If it is unavailable, yanpresence falls back to
+static catalog artwork where available. Your music and video files are not
+uploaded.
+
+Existing custom settings are preserved. You can keep using your own Discord
+applications and storage; see [Advanced setup](#advanced-setup). To disable
+uploads, set `animatedArtwork.enabled` and `uploadLocalArtwork` to `false`.
+
 ## Requirements
 
 - One of:
@@ -74,9 +113,9 @@ And expanded, when someone clicks into your profile:
     from the Microsoft Store (tested on Windows 11 26200, Apple Music 1.1540)
   - **Linux** with a browser for Apple Music (tested on Ubuntu 26.04,
     Chrome 151, Firefox 149)
-- Node.js 18+ (developed on 26)
+- **Source installs only:** Node.js 18+ (developed on 26)
 - The Discord **desktop** app running (the web client has no local IPC socket)
-- `ffmpeg` — only for animated artwork (`brew install ffmpeg` /
+- **Source installs only:** `ffmpeg` and `ffprobe` for animated artwork (`brew install ffmpeg` /
   `sudo apt install ffmpeg` / `winget install Gyan.FFmpeg`)
 - `webp` — only if you switch `animatedArtwork.format` to `"webp"`
   (`brew install webp` / `sudo apt install webp`); the default AVIF path needs
@@ -90,45 +129,28 @@ On Linux, `busctl` (part of systemd, already installed) is used for the MPRIS
 source, and the companion extension in [`browser/`](browser/) is needed if you
 play in Chrome — see below for why.
 
-## Setup
+## Run from source
 
-### 1. Create a Discord application
-
-Go to <https://discord.com/developers/applications> → **New Application**.
-
-**Name it `Apple Music`.** Discord builds the "Listening to …" header from the
-application's name — not from anything the client sends — so the name you pick
-here is the name everyone sees.
-
-Copy the **Application ID** from *General Information*.
-
-While you're there, open **Rich Presence → Art Assets** and upload two images:
-
-- **`blank`** — upload [`assets/blank.png`](assets/blank.png), a fully
-  transparent 1024×1024 PNG. This is the fallback for when there's no album art
-  to show. Without it, an empty large-image slot renders as Discord's grey "?"
-  placeholder; with it, the slot just reads as blank. Configured via
-  `placeholderImageKey`.
-- **`applemusic`** *(optional)* — an Apple Music glyph, shown as the small badge
-  in the corner of the album art. Skip it and set `showSmallImage: false`.
-
-### 2. Configure
+macOS and Linux use the source install. Windows developers can use it too.
+Install Node.js and ffmpeg for your platform, then:
 
 ```bash
-cd ~/yanpresence
-node bin/yanpresence.js --init
+git clone https://github.com/OoEthanoO/yanpresence.git
+cd yanpresence
 ```
 
-That writes `~/Library/Application Support/yanpresence/config.json` on macOS,
+There are no npm runtime dependencies to install. Shared Discord applications
+and artwork hosting work here too, without creating a config. To customize the
+defaults, `node bin/yanpresence.js --init` writes a config to
+`~/Library/Application Support/yanpresence/config.json` on macOS,
 `%APPDATA%\yanpresence\config.json` on Windows, or
-`~/.config/yanpresence/config.json` on Linux. Open it and paste your
-Application ID into `clientId`.
+`~/.config/yanpresence/config.json` on Linux.
 
 On Linux, also install the browser extension if you use Chrome:
 `chrome://extensions` → **Developer mode** → **Load unpacked** → the
 [`browser/`](browser/) directory. Firefox needs nothing.
 
-### 3. Check the setup
+### Check the setup
 
 ```bash
 node bin/yanpresence.js --doctor
@@ -153,7 +175,7 @@ On Linux, play something in a browser before running `--doctor`: it reports what
 each player looks like from the outside, which is how you find out whether your
 browser identifies itself (see below).
 
-### 4. Run it
+### Run it
 
 ```bash
 node bin/yanpresence.js
@@ -171,14 +193,14 @@ That is the only thing that puts the bare command there — there are no
 dependencies to install, so an `npm install` alone does not do it. Undo it with
 `npm unlink -g yanpresence`.
 
-On Windows, the thing you probably want instead is the Start menu entry:
+For a Windows source checkout, add a Start menu entry with:
 
 ```bash
 npm run install-windows
 ```
 
-That is the whole Windows setup — see [Windows](#windows) below for what it
-writes and how to quit the thing once it is running.
+This developer shortcut keeps using the checkout and your installed Node.js.
+For a self-contained installation, use the Windows installer above.
 
 To have it start at login:
 
@@ -199,6 +221,59 @@ snap-packaged browser only answers MPRIS queries from unconfined callers, and a
 systemd user unit is unconfined. Launching yanpresence from inside another
 sandboxed application's terminal is the usual way to see `Access denied` there.
 
+### Build the Windows installer
+
+On Windows, from a source checkout with Node.js and Windows PowerShell 5.1:
+
+```powershell
+npm run build:windows
+```
+
+The build downloads pinned packaging tools and runtimes, verifies their
+checksums, and creates `dist/yanpresence-1.0.0-windows-x64-setup.exe`. It bundles
+Node.js, ffmpeg and ffprobe. Give that file to another Windows user; they only
+need Discord and the Apple apps installed. Build tools are needed on the
+packaging machine, not on recipients' computers.
+
+### Publish a release
+
+Bump `version` in `package.json`, commit, and push a matching tag:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The **Windows installer** workflow builds and tests the installer, then attaches
+it to a **draft** release, once under its versioned name and once as
+`yanpresence-windows-x64-setup.exe`. Review the draft and publish it. The
+website's download buttons use `releases/latest/download/…`, which GitHub
+resolves only to published releases. Until you publish, the buttons keep
+serving the previous release, or return a 404 if none has ever been published.
+
+## Advanced setup
+
+### Use your own Discord applications
+
+This is optional. Fresh installs use Apple Music application
+`1533115403742740532` and Apple TV application `1536042928068235354`.
+
+To use your own, create an application named **Apple Music** in the
+[Discord Developer Portal](https://discord.com/developers/applications) and set
+its Application ID as `clientId` in your config. For TV, create a second
+application named **Apple TV** and set `tv.clientId`. Discord builds the card
+header from these application names.
+
+Under **Rich Presence → Art Assets**, upload [`assets/blank.png`](assets/blank.png)
+as **`blank`** for the empty-cover fallback. Optionally upload an Apple Music
+glyph as **`applemusic`** for the small badge, or set `showSmallImage: false`.
+
+### Use your own artwork storage
+
+Set `hosting.mode` to `s3`, `command`, or `webhook` and configure that provider
+as described below. Your credentials stay in your local config. To return to
+the shared service, set `hosting.mode` to `shared`.
+
 ## Animated artwork
 
 Apple publishes motion artwork for a lot of albums, but ships it as an **HLS
@@ -211,16 +286,24 @@ external-URL assets support GIF, animated WebP and AVIF — assets *uploaded* to
 the Developer Portal cannot animate at all, which is why this goes through a
 hosted URL. Results are cached per album.
 
-Hosting has three modes.
+### `shared` — default, no setup
+
+The built-in image gateway uploads covers to the shared bucket without giving
+clients access to bucket credentials. The shared service has a **25 MiB per
+artwork** limit and upload rate limits. Animated artwork is enabled by default;
+static artwork remains the fallback when an encode or upload fails. Embedded
+covers from local tracks use the same gateway and are also publicly accessible.
+
+The following storage modes are optional alternatives for advanced setups.
 
 > **`webhook` cannot serve presence assets.** The upload succeeds and the image
 > is visible in the channel, but Discord will not render a `cdn.discordapp.com`
 > attachment URL as a Rich Presence asset — those URLs carry a mandatory signed
 > query string (`?ex=…&is=…&hm=…`), 404 without it, and come out as the grey "?"
 > placeholder. Confirmed by bisecting: the *identical* JPEG renders from Apple's
-> CDN and fails from Discord's. Use `s3`.
+> CDN and fails from Discord's. Use `shared`, `s3`, or `command` for presence.
 
-### `s3` — recommended
+### `s3` — your own bucket
 
 Any S3-compatible bucket, signed natively — no `rclone` or `aws-cli` to install.
 Built for **Cloudflare R2**, whose `pub-*.r2.dev` URLs are plain and unsigned,
@@ -289,14 +372,15 @@ Posts to a Discord webhook you own. Fine if you just want the files kept
 somewhere visible, but see the warning above — Discord will not render those
 URLs as presence assets. Capped at 10 MB unboosted, 50 MB at Boost Level 2.
 
-With neither configured, everything still works — you just get static 1024×1024
-art. Animation is opt-in, not required.
+If your selected host is unconfigured or unavailable, everything else still
+works — catalog covers fall back to static 1024×1024 art.
 
-### Nothing is truncated, shrunk, or degraded
+### Full loops at high quality
 
 The defaults encode the **entire loop** (Apple's are ~20–24s) at **source
-framerate**, at high quality, in **AVIF** — about 3.7 MB, which fits inside even
-a free Discord webhook. No clipping, no downscaling, no quality ladder.
+framerate**, at high quality, in **AVIF**. One measured cover is 3.7 MB; sizes
+vary by album. Shared hosting allows 25 MiB, with larger encodes refitted or
+skipped according to `onOversize`. Duration is never truncated by size retries.
 
 That only works because of the format. The same full loop, measured on a real
 Apple motion master at 30fps:
@@ -329,8 +413,8 @@ lift the cap by hosting it yourself:
 }
 ```
 
-`maxBytes: null` disables the budget check altogether, so no encode is ever
-refit. On a free webhook, `2160 / crf 26` (8.4 MB) gets you Apple's full
+With this `command` host, `maxBytes: null` disables the budget check, so no
+encode is refitted. On a free webhook, `2160 / crf 26` (8.4 MB) gets you Apple's full
 resolution and framerate within the 10 MB cap.
 
 Uncapping is not a gamble on the `s3` path: **Discord's media proxy has been
@@ -351,8 +435,9 @@ If you would rather have *no* animation than a compromised one, set
 
 ### If it does go over budget
 
-With the defaults it never will — 3.7 MB against a 9 MB budget. But if you push
-the settings up on webhook hosting, `onOversize` decides what happens:
+Output size varies with the artwork. Shared hosting allows 25 MiB per image;
+webhook hosting defaults to a 9 MiB encode budget. When an encode exceeds its
+budget, `onOversize` decides what happens:
 
 - `"degrade"` (default) — re-encode to fit. Quality is spent **before**
   resolution, and the retry targets the budget by area rather than stepping down
@@ -360,8 +445,9 @@ the settings up on webhook hosting, `onOversize` decides what happens:
 - `"skip"` — refuse to compromise. The animation is abandoned and the static
   1024×1024 cover is used instead.
 
-Setting `"maxBytes": null` disables the check entirely, which is the right thing
-with `command` hosting.
+Setting `"maxBytes": null` uses the selected host's default budget: 25 MiB for
+shared hosting, 9 MiB for webhook hosting, and no limit for `s3` or `command`.
+The shared gateway's 25 MiB limit still applies if you set a larger custom budget.
 
 ### Hardware encoding, and which GPU path actually works
 
@@ -488,16 +574,22 @@ single-frame still cover, stream 1 is the animation. Probing `v:0` reports
 Config is read from the first of these that exists:
 
 1. `$YANPRESENCE_CONFIG`
-2. `~/Library/Application Support/yanpresence/config.json` (macOS)
-3. `~/.config/yanpresence/config.json` (Linux, and anywhere else)
-4. `./config.json`
+2. The platform config: `~/Library/Application Support/yanpresence/config.json`
+   on macOS, `%APPDATA%\yanpresence\config.json` on Windows, or
+   `~/.config/yanpresence/config.json` on Linux
+3. `~/.config/yanpresence/config.json` (fallback on other platforms)
+4. `config.json` in the application directory
 
-Cache and encoded artwork go beside it on macOS, and under
+A config file is optional: missing settings use the shared defaults. Cache and
+encoded artwork go under `~/Library/Application Support/yanpresence/cache` on
+macOS, `%LOCALAPPDATA%\yanpresence\cache` on Windows, and
 `~/.cache/yanpresence` on Linux.
 
 | Key | Default | |
 |---|---|---|
-| `clientId` | — | **Required.** Discord Application ID. |
+| `clientId` | `"1533115403742740532"` | Shared Apple Music Discord application. Override to use your own. |
+| `tv.enabled` | `true` | Apple TV presence on macOS and Windows. |
+| `tv.clientId` | `"1536042928068235354"` | Shared Apple TV Discord application. |
 | `activityName` | `"Apple Music"` | Keep in sync with the app's name in the portal. |
 | `storefront` | `"us"` | Apple Music storefront for lookups and links. |
 | `source` | `"auto"` | Where playback state comes from: `auto` (the Apple apps on macOS and Windows, the web player on Linux), `apple-apps`, `browser`. |
@@ -514,7 +606,7 @@ Cache and encoded artwork go beside it on macOS, and under
 | `artworkSize` | `1024` | Square px requested from Apple's CDN. |
 | `showSmallImage` | `true` | Small corner badge. |
 | `smallImageKey` | `"applemusic"` | Name of the Art Asset uploaded in the portal. |
-| `placeholderImageKey` | `"blank"` | Portal asset shown when there's no album art, so the slot never renders as Discord's "?". Upload `assets/blank.png`. `null` leaves the slot empty. |
+| `placeholderImageKey` | `"blank"` | Portal asset shown when there's no album art. Shared applications include it; upload `assets/blank.png` only for your own application. `null` leaves the slot empty. |
 | `linkButtons` | `false` | Also attach classic Rich Presence buttons — a fallback for older clients that don't render `details_url`/`state_url`/`large_url`. |
 | `showWhenPaused` | `false` | Keep the presence up while paused. Off by default — a paused track isn't something you're listening to. When on, the progress bar is dropped. |
 | `pollIntervalMs` | `1000` | How often the source is sampled. |
@@ -522,7 +614,7 @@ Cache and encoded artwork go beside it on macOS, and under
 | `seekToleranceSec` | `2` | Drift before a seek is assumed and the timeline is rebased. |
 | `clearDelayMs` | `5000` | How long playback must be non-playing — paused, stopped or quit — before the presence clears. Music.app blips `paused` between tracks, so clearing instantly would flicker the status between every song. Lower it for a snappier hide. |
 | `pauseClearDelayMs` | `null` | How long a *pause* waits, as opposed to a stop. `null` asks the source: `clearDelayMs` for the desktop apps, whose pause is ambiguous between tracks, and 1.5s for the web player, whose pause is not. |
-| `hosting.mode` | `"webhook"` | `webhook` (Discord-hosted, capped) or `command` (your own storage, uncapped). |
+| `hosting.mode` | `"shared"` | Shared artwork gateway, or your own `s3`, `command`, or archival `webhook` host. |
 | `hosting.webhookUrl` | — | Discord webhook URL, for `webhook` mode. |
 | `hosting.command` | — | Uploader command with `{file}` / `{name}`, for `command` mode. Must print the public URL. |
 | `animatedArtwork.format` | `"avif"` | `avif` \| `webp` \| `gif`. |
@@ -531,7 +623,7 @@ Cache and encoded artwork go beside it on macOS, and under
 | `animatedArtwork.maxDurationSec` | `null` | `null` plays the whole loop. A number truncates. |
 | `animatedArtwork.crf` | `20` | AVIF quality; lower is better. 14 ≈ source. |
 | `animatedArtwork.quality` | `75` | WebP quality, when `format` is `webp`. |
-| `animatedArtwork.maxBytes` | `9437184` | Encode ceiling. `null` disables the check. |
+| `animatedArtwork.maxBytes` | `null` | Uses the host budget: 25 MiB shared, 9 MiB webhook, unlimited S3/command. A number sets a custom encode ceiling. |
 | `animatedArtwork.onOversize` | `"degrade"` | `degrade` refits to fit; `skip` falls back to static art rather than compromise. |
 | `animatedArtwork.hardware.mode` | `"auto"` | GPU encoding: `auto` uses AMD's AMF encoder on Windows and the CPU elsewhere; `off` always uses the CPU; `amf` and `vaapi` force a specific one. See [Hardware encoding](#hardware-encoding-and-which-gpu-path-actually-works). |
 | `animatedArtwork.hardware.device` | `"auto"` | `auto` \| `amd` \| `intel` \| `nvidia` \| a `/dev/dri/renderD*` path. VAAPI only, chosen by vendor rather than by number. AMF enumerates only AMD devices and ignores this. |
@@ -566,12 +658,8 @@ Available on macOS and Windows, and not through a browser — see
 On macOS, TV.app descends from the same iTunes scripting dictionary as Music.app
 — it answers `player state`, `player position` and `current track` the same way
 — so watching it costs one more resident `osascript` and nothing else. On
-Windows it is a second media session, read by the watcher that is running
-anyway, so it costs nothing at all. Turn it on:
-
-```json
-"tv": { "enabled": true }
-```
+Windows it is read from the Apple TV player's UI Automation tree. It is enabled
+by default. To turn it off, set `tv.enabled` to `false`.
 
 What lands on Discord, for an episode:
 
@@ -590,18 +678,12 @@ reader, "Watching Man City" does not. Films use their own title, with the year
 and director beneath. Only one source holds the presence at a time; whatever is
 actually playing wins, and video beats audio when both are.
 
-### You need a second Discord application
+### The Apple TV application is already configured
 
-Discord builds the card header from the **application's** name, and one
-connection speaks for one application — the same constraint that makes step 1
-of setup "name it `Apple Music`". Announce a TV show through the music
-application and the header reads *"Watching Apple Music"*.
-
-So create a second application named **`Apple TV`**, upload the same
-[`assets/blank.png`](assets/blank.png) as `blank`, and put its Application ID in
-`tv.clientId`. yanpresence reconnects under the right application as you switch
-between watching and listening. Leave it empty and everything still works —
-only the header is wrong.
+The shared Apple TV application gives the card its **Watching Apple TV** header.
+yanpresence reconnects under the matching application when you switch between
+watching and listening. To use your own applications, see
+[Advanced setup](#advanced-setup).
 
 ### Artwork
 
@@ -674,19 +756,21 @@ asking twice would mean two PowerShell hosts polling the same API.
 
 ### Launching it from Windows Search
 
-```bash
-npm run install-windows
-```
+The Windows installer adds the Start menu entry automatically and enables
+start at login by default. Press **Start**, type `yanpresence`, and press
+Enter to launch it again. Uninstall it from Windows **Settings → Apps →
+Installed apps**; your config and caches are kept.
 
-That writes one shortcut, per-user, no administrator needed:
+For developers running a source checkout, `npm run install-windows` creates
+a shortcut without packaging the app. Both installation methods use:
 
 ```
 %APPDATA%\Microsoft\Windows\Start Menu\Programs\yanpresence.lnk
 ```
 
-Press **Start**, type `yanpresence`, press Enter. Add `-- -Startup` to the
-command above to also run it at login; `npm run uninstall-windows` removes both
-and leaves your config and caches alone.
+For the source shortcut only, add `-- -Startup` to also run it at login;
+`npm run uninstall-windows` removes those shortcuts and leaves your config and
+caches alone.
 
 The shortcut does not point at `node.exe` directly. Node is a console
 application, so Windows would give it a console: a black window in your taskbar
@@ -737,14 +821,14 @@ exits, however it exits, which a PID file could not promise.
 
 | | |
 |---|---|
-| Config | `%APPDATA%\yanpresence\config.json` |
+| Installed app | `%LOCALAPPDATA%\Programs\yanpresence\` |
+| Config | `%APPDATA%\yanpresence\config.json` (optional) |
 | Caches | `%LOCALAPPDATA%\yanpresence\cache\` |
 | Log | `%LOCALAPPDATA%\yanpresence\cache\yanpresence.log` |
 
 The log exists because a hidden run has nowhere to print. It is opened *before*
-the config is validated, deliberately: a missing `clientId` is the likeliest
-reason a fresh install refuses to start, and that message would otherwise go to
-a console nobody has. A start-up failure in tray mode also raises a dialog box,
+the config is validated, so a malformed custom setting is recorded even when
+there is no visible console. A start-up failure in tray mode also raises a dialog box,
 since "nothing happened" is not an error message.
 
 ### The album arrives inside the artist field
@@ -1045,8 +1129,9 @@ identifier than `AppleInc.AppleMusicWin`, put that prefix in
 to start is invisible by design. Look at
 `%LOCALAPPDATA%\yanpresence\cache\yanpresence.log`, which is written before
 the config is even validated. A start-up failure also raises a dialog box; if
-you got neither, node itself was not found — the launcher checks `PATH` and the
-usual install locations, and says so in a message box when it comes up empty.
+you got neither, rerun the installer to restore the bundled runtime. Source
+installs also check `PATH` and usual Node.js install locations, and show a
+message box if Node.js cannot be found.
 
 **Windows: I cannot find the tray icon.** Windows 11 hides new notification-area
 icons behind the **^** arrow next to the clock. Click it, then drag the icon
@@ -1069,8 +1154,8 @@ button fallback.
 
 **A grey "?" where the album art should be.** That is Discord's placeholder for
 an asset it could not resolve — the field was sent, but the image did not load.
-Upload `assets/blank.png` as a portal asset named `blank` so the fallback has
-somewhere to land, then run:
+The shared applications already include the `blank` fallback asset. If you
+use your own application, upload `assets/blank.png` as `blank`. Then run:
 
 ```bash
 node bin/yanpresence.js --test-assets
@@ -1082,10 +1167,10 @@ client actually renders. Discord reports nothing back about asset resolution,
 so looking is the only way to tell.
 
 **No album art at all.** Check `--dry-run` output for `large_image`. If the
-track is a local file that isn't in Apple's catalog, artwork needs
-`hosting.webhookUrl` (or `hosting.command`) set so its embedded cover can be
-hosted. On Windows that cover comes from the thumbnail the app hands the media
-session, which is the only place Windows will show it to us.
+track is a local file that isn't in Apple's catalog, its embedded cover uses
+the shared gateway by default. Check the log for an upload error or rate limit;
+custom hosts must also be configured and reachable. On Windows that cover comes
+from the thumbnail the app hands the media session.
 
 **Windows: the Apple TV card shows the wrong show, or the numbering is missing.**
 The season and episode are read out of free text there rather than from
@@ -1095,6 +1180,8 @@ next to what was made of them, which turns a guess into a diff.
 
 **Animated art never shows.** Most albums simply don't have motion artwork.
 Run with `--verbose`: you'll see `Hosted animated artwork for …` when one does.
+The shared gateway can reject oversized or rate-limited uploads; static catalog
+art remains available while the animated cover cannot be hosted.
 
 ## License
 

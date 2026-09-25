@@ -584,11 +584,11 @@
         </p>
 
         <div class="cta-row">
-          <a class="btn btn-primary" href="https://github.com/OoEthanoO/yanpresence/archive/refs/heads/main.zip">
+          <a class="btn btn-primary" data-installer href="https://github.com/OoEthanoO/yanpresence/releases/latest/download/yanpresence-windows-x64-setup.exe">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
-            Download source
+            Download for Windows
           </a>
           <a class="btn btn-ghost" href="https://github.com/OoEthanoO/yanpresence" target="_blank" rel="noopener">
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -599,7 +599,8 @@
         </div>
 
         <p class="hero-note">
-          MIT licensed · zero npm dependencies · macOS, Windows and Linux
+          Windows 10/11, 64-bit<span data-installer-meta></span> · macOS and Linux
+          <a href="#get">install from source</a>
         </p>
       </div>
 
@@ -732,9 +733,9 @@
       </div>
 
       <div class="callout">
-        <b>On Windows it also runs as an app.</b> A Start menu entry so Windows Search finds it,
-        and a notification-area icon whose menu has Quit — which clears your presence with Discord
-        on the way out rather than leaving a stale status behind.
+        <b>On Windows, just run the installer.</b> It includes the runtime and artwork tools,
+        adds a Start menu entry and starts at login. Quit from the notification-area icon whenever
+        you want; your presence clears when the app exits.
       </div>
     </div>
   </section>
@@ -744,15 +745,16 @@
     <div class="wrap split">
       <div class="section-head" style="margin-bottom:0">
         <p class="eyebrow">Animated artwork</p>
-        <h2>The whole loop. Full resolution. 3.7&nbsp;MB.</h2>
+        <h2>Animated covers. Hosting included.</h2>
         <p class="lede" style="font-size:var(--step-0)">
-          Apple publishes motion covers for a lot of albums, but ships them as HLS video, which
-          Discord can't render. Transcoding to GIF is why full-length motion art looked impossible —
-          it lands around 128&nbsp;MB. AVIF changes the arithmetic completely, so nothing has to be
-          cut, shrunk or degraded.
+          yanpresence turns Apple’s motion covers into animated AVIF and uploads them to shared
+          artwork storage automatically. No bucket, cloud account or storage keys to set up.
+          The full loop is kept, with high-quality 1024px artwork by default.
         </p>
         <p class="lede" style="font-size:0.9rem;color:var(--faint)">
-          Measured on a real Apple motion master — the full 20.6s loop at source framerate.
+          The table shows one measured 20.6s cover; file sizes vary. Shared hosting accepts
+          artwork up to 25 MiB and limits upload frequency. Static covers are used when an
+          animation cannot be uploaded.
         </p>
       </div>
 
@@ -788,25 +790,42 @@
       <div>
         <div class="section-head">
           <p class="eyebrow">Download</p>
-          <h2>Get it running.</h2>
+          <h2>Run the installer. Press play.</h2>
           <p class="lede" style="font-size:var(--step-0)">
-            It runs from source on Node — there's nothing to compile and no dependencies to install.
-            Setup is mostly telling Discord who you are.
+            On Windows, one installer includes everything yanpresence needs. The Apple Music and
+            Apple TV Discord applications and shared artwork hosting are already configured.
+            Just open Discord and play something.
           </p>
         </div>
 
         <div class="cta-row" style="margin-top:0">
-          <a class="btn btn-primary" href="https://github.com/OoEthanoO/yanpresence/archive/refs/heads/main.zip">Download .zip</a>
-          <a class="btn btn-ghost" href="https://github.com/OoEthanoO/yanpresence" target="_blank" rel="noopener">Browse the source</a>
+          <a class="btn btn-primary" data-installer href="https://github.com/OoEthanoO/yanpresence/releases/latest/download/yanpresence-windows-x64-setup.exe">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Download for Windows
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/OoEthanoO/yanpresence/releases" target="_blank" rel="noopener">All releases</a>
         </div>
 
-        <h3 style="font-size:var(--step-1);margin-top:2.6rem;margin-bottom:0.9rem">Requirements</h3>
+        <p class="hero-note">
+          <code style="overflow-wrap:anywhere" data-installer-name>yanpresence-windows-x64-setup.exe</code>
+          · Windows 10/11, 64-bit<span data-installer-meta></span><span data-installer-sum hidden>
+          · <a href="#" target="_blank" rel="noopener">SHA-256</a></span>
+        </p>
+
+        <h3 style="font-size:var(--step-1);margin-top:2.6rem;margin-bottom:0.9rem">What you need</h3>
         <ul class="reqs">
-          <li><b>Node.js 18+</b> — the whole thing is plain JavaScript with zero npm dependencies.</li>
-          <li><b>The Discord desktop app</b>, running. The web client has no local IPC socket to speak to.</li>
-          <li><b>A Discord application</b> of your own, named <code>Apple Music</code> — Discord builds the "Listening to…" header from the application's name, so it has to be yours.</li>
-          <li><b>ffmpeg</b>, only if you want animated artwork. The static path needs nothing extra.</li>
+          <li><b>Windows 10/11, 64-bit</b>, with Apple Music or Apple TV from the Microsoft Store.</li>
+          <li><b>The Discord desktop app</b>, running with activity sharing enabled.</li>
+          <li><b>macOS and Linux:</b> use the source install with Node.js 18+ and ffmpeg for animated covers.</li>
         </ul>
+        <div class="callout">
+          <b>Artwork is public.</b> Animated covers and embedded covers from local tracks are
+          uploaded to shared storage and accessible to anyone with the URL. Your music and video
+          files stay on your computer. You can disable uploads or use your own storage in
+          <a href="https://github.com/OoEthanoO/yanpresence#advanced-setup">advanced settings</a>.
+        </div>
       </div>
 
       <div>
@@ -910,25 +929,21 @@
 
   const STEPS = {
     mac: [
-      ['Get the source', 'Nothing to install past this — there are no dependencies.', CLONE],
-      ['Create a Discord application', 'At discord.com/developers, named <b>Apple Music</b>. Copy its Application ID. Under Rich Presence → Art Assets, upload <code>assets/blank.png</code> named <code>blank</code>.', null],
-      ['Write a config and paste the ID in', 'Lands in <code>~/Library/Application Support/yanpresence/</code>.', 'node bin/yanpresence.js --init'],
-      ['Check the setup', 'Verifies Music.app, Discord, the catalog lookup and the artwork toolchain. First run asks macOS for permission to control Music.', 'node bin/yanpresence.js --doctor'],
-      ['Run it', 'Or <code>npm run install-agent</code> to start it at login.', 'node bin/yanpresence.js'],
+      ['Install Node.js and ffmpeg', 'Use Node.js 18+ and ffmpeg with ffprobe. These tools are needed only for source installs.', null],
+      ['Get the source', 'No npm runtime dependencies to install.', CLONE],
+      ['Check the setup', 'Shared Discord applications and artwork hosting are ready without a config. macOS asks for permission to control Music on first run.', 'node bin/yanpresence.js --doctor'],
+      ['Run it', 'Open Discord and Music. Use <code>npm run install-agent</code> to start yanpresence at login.', 'node bin/yanpresence.js'],
     ],
     win: [
-      ['Get the source', 'Nothing to install past this — there are no dependencies.', CLONE],
-      ['Create a Discord application', 'At discord.com/developers, named <b>Apple Music</b>. Copy its Application ID. Under Rich Presence → Art Assets, upload <code>assets/blank.png</code> named <code>blank</code>.', null],
-      ['Write a config and paste the ID in', 'Lands in <code>%APPDATA%\\yanpresence\\</code>.', 'node bin/yanpresence.js --init'],
-      ['Check the setup', 'Verifies both Apple apps, the Discord pipe, and which GPU will encode your artwork.', 'node bin/yanpresence.js --doctor'],
-      ['Add it to the Start menu', 'Then press Start and type <b>yanpresence</b>. It runs without a window — quit it from the notification-area icon. Add <code>-- -Startup</code> to also run it at login.', 'npm run install-windows'],
+      ['Run the installer', 'Download it with the button on this page and open it. Node.js, ffmpeg and ffprobe are included. No administrator access is required. The installer is not code-signed yet, so Windows SmartScreen may warn you: choose <b>More info</b> → <b>Run anyway</b>.', null],
+      ['Finish setup', 'Start at login and launch on finish are selected by default. Your shared Discord applications and artwork hosting are already configured.', null],
+      ['Open Discord and press play', 'Use Apple Music or Apple TV. yanpresence runs in the notification area; right-click its icon to open the log or quit. Find it again from the Start menu.', null],
     ],
     linux: [
-      ['Get the source', 'Nothing to install past this — there are no dependencies.', CLONE],
-      ['Create a Discord application', 'At discord.com/developers, named <b>Apple Music</b>. Copy its Application ID. Under Rich Presence → Art Assets, upload <code>assets/blank.png</code> named <code>blank</code>.', null],
-      ['Write a config and paste the ID in', 'Lands in <code>~/.config/yanpresence/</code>.', 'node bin/yanpresence.js --init'],
-      ['Install the browser extension', 'Only needed for Chrome, which publishes no page URL over MPRIS. <code>chrome://extensions</code> → Developer mode → Load unpacked → the <code>browser/</code> directory. Firefox needs nothing.', null],
-      ['Run it', 'Or <code>npm run install-service</code> for a systemd user unit.', 'node bin/yanpresence.js'],
+      ['Install Node.js and ffmpeg', 'Use Node.js 18+ and ffmpeg with ffprobe. MPRIS also uses busctl from systemd.', null],
+      ['Get the source', 'Shared Discord applications and artwork hosting are ready without a config.', CLONE],
+      ['Install the browser extension', 'For Chrome: <code>chrome://extensions</code> → Developer mode → Load unpacked → the <code>browser/</code> directory. Firefox needs no extension.', null],
+      ['Run it', 'Open the Discord desktop app and play Apple Music in your browser. Use <code>npm run install-service</code> to start at login.', 'node bin/yanpresence.js'],
     ],
   };
 
@@ -990,4 +1005,44 @@
     : navigator.userAgent.includes('Linux') ? 'linux' : 'mac';
   osTabs.forEach((o) => o.setAttribute('aria-selected', String(o.dataset.os === guess)));
   renderSteps(guess);
+
+  /* ---- the installer: version and size from the newest published release ---- */
+  // The buttons already work without this: releases/latest/download/<name>
+  // always serves the newest published installer. This only adds the version
+  // and size next to them, and follows a release that lacks the version-less
+  // asset to its versioned one. Any failure (rate limit, offline, no release
+  // yet) leaves the page exactly as written.
+  (async () => {
+    try {
+      const res = await fetch('https://api.github.com/repos/OoEthanoO/yanpresence/releases/latest', {
+        headers: { Accept: 'application/vnd.github+json' },
+      });
+      if (!res.ok) return;
+      const release = await res.json();
+      const assets = Array.isArray(release.assets) ? release.assets : [];
+      const exe = assets.find((a) => a.name === 'yanpresence-windows-x64-setup.exe')
+        || assets.find((a) => /^yanpresence-[\d.]+-windows-x64-setup\.exe$/.test(a.name));
+      if (!exe) return;
+
+      document.querySelectorAll('[data-installer]').forEach((a) => { a.href = exe.browser_download_url; });
+      document.querySelectorAll('[data-installer-name]').forEach((n) => { n.textContent = exe.name; });
+
+      const facts = [];
+      if (release.tag_name) facts.push(String(release.tag_name).replace(/^v?/, 'v'));
+      if (exe.size > 0) facts.push(`${Math.round(exe.size / (1024 * 1024))} MB`);
+      document.querySelectorAll('[data-installer-meta]').forEach((s) => {
+        s.textContent = facts.map((f) => ` · ${f}`).join('');
+      });
+
+      const sum = assets.find((a) => a.name === `${exe.name}.sha256`);
+      if (sum) {
+        document.querySelectorAll('[data-installer-sum]').forEach((s) => {
+          s.querySelector('a').href = sum.browser_download_url;
+          s.hidden = false;
+        });
+      }
+    } catch {
+      /* keep the static links */
+    }
+  })();
 </script>
