@@ -89,6 +89,9 @@ export class ArtworkHost {
   }
 
   get canHost() {
+    if (this.hosting.mode === 'shared') {
+      return Boolean(this.hosting.shared?.endpoint && this.hosting.shared?.publicBaseUrl);
+    }
     if (this.hosting.mode === 'command') return Boolean(this.hosting.command);
     if (this.hosting.mode === 's3') {
       const c = this.hosting.s3 ?? {};
@@ -110,6 +113,10 @@ export class ArtworkHost {
    * command hosting -- your own storage has no Discord-imposed cap.
    */
   get byteBudget() {
+    if (this.hosting.mode === 'shared') {
+      const limit = this.hosting.shared.maxBytes;
+      return this.opts.maxBytes == null ? limit : Math.min(limit, this.opts.maxBytes);
+    }
     if (this.opts.maxBytes != null) return this.opts.maxBytes;
     // Only Discord's webhook imposes a cap. Your own storage does not, so
     // nothing needs refitting and full quality is kept by default.
@@ -151,8 +158,8 @@ export class ArtworkHost {
     // bucket -- moving machines, or fixing a wrong one -- and every cached URL
     // still refers to the old place. Nothing expires on the s3 path, so without
     // this the dead URLs would be served indefinitely.
-    if (this.hosting.mode === 's3' && entry.url) {
-      const base = (this.hosting.s3?.publicBaseUrl ?? '').replace(/\/+$/, '');
+    if (['shared', 's3'].includes(this.hosting.mode) && entry.url) {
+      const base = (this.hosting[this.hosting.mode]?.publicBaseUrl ?? '').replace(/\/+$/, '');
       if (base && !entry.url.startsWith(`${base}/`)) return null;
     }
     // Refresh an hour early rather than serving a URL that expires mid-song.
@@ -730,9 +737,40 @@ export class ArtworkHost {
    * ------------------------------------------------------------------ */
 
   async upload(buffer, filename, contentType) {
+    if (this.hosting.mode === 'shared') return this.uploadViaShared(buffer, contentType);
     if (this.hosting.mode === 'command') return this.uploadViaCommand(buffer, filename);
     if (this.hosting.mode === 's3') return this.uploadViaS3(buffer, filename, contentType);
     return this.uploadViaWebhook(buffer, filename, contentType);
+  }
+
+  async uploadViaShared(buffer, contentType) {
+    const service = this.hosting.shared;
+    if (!service?.endpoint) throw new Error('Shared artwork service is not configured');
+    if (buffer.length > service.maxBytes) throw new Error('Artwork exceeds the shared service upload limit');
+    const endpoint = new URL(`${service.endpoint.replace(/\/+$/, '')}/v1/artwork`);
+    if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password) {
+      throw new Error('Shared artwork service requires HTTPS');
+    }
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': contentType, 'Content-Length': String(buffer.length) },
+      body: buffer,
+      redirect: 'error',
+      signal: AbortSignal.timeout(service.timeoutMs ?? 60_000),
+    });
+    if (!response.ok) {
+      // Do not retry here: shared rate limits should fall back to static art.
+      throw new Error(`Shared artwork upload failed (${response.status})`);
+    }
+    const { url } = await response.json();
+    const base = new URL(`${service.publicBaseUrl.replace(/\/+$/, '')}/`);
+    const hosted = new URL(url);
+    if (hosted.protocol !== 'https:' || hosted.origin !== base.origin ||
+        !hosted.pathname.startsWith(base.pathname) || hosted.username || hosted.password ||
+        hosted.search || hosted.hash) {
+      throw new Error('Shared artwork service returned an unexpected URL');
+    }
+    return hosted.href;
   }
 
   /**

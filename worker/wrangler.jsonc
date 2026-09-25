@@ -1,0 +1,28 @@
+{
+  "$schema": "https://unpkg.com/wrangler/config-schema.json",
+  "name": "yanpresence-artwork",
+  "account_id": "c09521024d7f4c564797cea9e5a690c7",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-21",
+  "workers_dev": true,
+  "preview_urls": false,
+  "vars": {
+    "PUBLIC_BASE_URL": "https://pub-5b7b8db2c38e4afe9e3b49ed09bff6d4.r2.dev",
+    "UPLOADS_ENABLED": "true"
+  },
+  "r2_buckets": [
+    { "binding": "ARTWORK_BUCKET", "bucket_name": "yanpresence" }
+  ],
+  "ratelimits": [
+    {
+      "name": "UPLOAD_RATE_LIMITER",
+      "namespace_id": "81001",
+      "simple": { "limit": 30, "period": 60 }
+    },
+    {
+      "name": "SERVICE_RATE_LIMITER",
+      "namespace_id": "81002",
+      "simple": { "limit": 180, "period": 60 }
+    }
+  ]
+}

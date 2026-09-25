@@ -1,8 +1,7 @@
 {
-  // Required. Discord Developer Portal -> your application -> Application ID.
-  // Name that application "Apple Music": Discord builds the "Listening to ..."
-  // header from the application name, not from anything we send.
-  "clientId": "",
+  // All settings are optional. The shared Apple Music and Apple TV Discord
+  // applications and shared artwork service are used automatically.
+  // To use your own Discord application, add "clientId": "YOUR_APPLICATION_ID".
 
   // Apple Music storefront for catalog lookups and the links we attach.
   "storefront": "us",
@@ -99,20 +98,15 @@
   // because there are no properties to ask for. Run `yanpresence --smtc` while
   // something is playing to see both what arrived and what was made of it.
   //
-  // clientId: Discord builds the card header from the *application* name, and
-  //   one connection speaks for one application. Left empty, TV is announced
-  //   through the Apple Music application and the header reads "Watching
-  //   Apple Music". Create a SECOND Discord application named "Apple TV" and
-  //   paste its Application ID here for the correct header — yanpresence
-  //   reconnects automatically as it switches between the two.
+  // The shared Apple TV application is used automatically. Add a clientId
+  // override here only if you want to use your own application.
   //
   // Artwork comes from the backend behind tv.apple.com (the iTunes Search API
   // no longer carries TV content, and TV+ streams have no embedded cover).
   // That covers the Apple TV+ catalogue; a purchased Store film finds no match
   // and falls back to placeholderImageKey.
   "tv": {
-    "enabled": false,
-    "clientId": "",
+    "enabled": true,
     "activityName": "Apple TV",
     "showSmallImage": false,
     "smallImageKey": "appletv"
@@ -128,13 +122,17 @@
   //   No Discord involvement and no cap. {file} and {name} are substituted:
   //     "rclone copyto {file} r2:art/{name} >&2 && echo https://cdn.you.com/{name}"
   //     "aws s3 cp {file} s3://bucket/{name} >&2 && echo https://cdn.you.com/{name}"
-  // "s3" is the recommended mode. NOTE: "webhook" uploads fine but Discord
+  // "shared" needs no account, bucket or credentials. Artwork sent to this
+  // service is public to anyone with its URL. Uploads have a 25 MiB ceiling
+  // and rate limits; if unavailable, catalog artwork falls back to static.
+  // "s3" is for your own storage. NOTE: "webhook" uploads fine but Discord
   // will NOT render cdn.discordapp.com URLs as presence assets — they carry a
   // signed query string and come out as the grey "?" placeholder.
   //
-  // For Cloudflare R2, fill in all five s3 fields. See the README.
+  // For your own Cloudflare R2, change mode to "s3" and fill in the s3 fields.
+  // Keep credentials in your personal config, never in a distributed build.
   "hosting": {
-    "mode": "s3",
+    "mode": "shared",
     "s3": {
       "endpoint": "https://<accountId>.r2.cloudflarestorage.com",
       "bucket": "yanpresence",
@@ -171,7 +169,8 @@
     "crf": 20,
     "quality": 75,
     "onOversize": "degrade",
-    "ffmpegPath": "ffmpeg",
+    // FFmpeg and FFprobe use the bundled copies in the Windows installer.
+    // Source installs use PATH. Add ffmpegPath/ffprobePath to override them.
     "img2webpPath": "img2webp",
 
     // GPU encoding. Nothing to configure: devices are discovered, ffmpeg is

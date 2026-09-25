@@ -2,10 +2,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SHARED_DEFAULTS } from './shared-defaults.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export const PROJECT_ROOT = path.resolve(__dirname, '..');
+
+function bundledTool(name) {
+  const bundled = path.join(PROJECT_ROOT, 'runtime', 'ffmpeg', 'bin', `${name}.exe`);
+  return process.platform === 'win32' && fs.existsSync(bundled) ? bundled : name;
+}
 
 // Three platforms, three opinions about where an application's files live.
 // macOS keeps app data in one place; Linux splits it, and putting a cache under
@@ -41,10 +47,9 @@ export const CACHE_DIR = cacheDir();
 export const LOG_FILE = path.join(CACHE_DIR, 'yanpresence.log');
 
 export const DEFAULTS = {
-  // Discord application ID (Developer Portal -> your app -> Application ID).
-  // Name the application "Apple Music" -- Discord renders the header as
-  // "Listening to <application name>".
-  clientId: '',
+  // Public shared Discord application. Users may override this with an ID
+  // from their own Developer Portal; no bot token or login is needed.
+  clientId: SHARED_DEFAULTS.clientId,
 
   // Sent as the activity's `name`. Discord renders the "Listening to ..."
   // header from the application's name in the Developer Portal, so keep the
@@ -206,15 +211,14 @@ export const DEFAULTS = {
   // presence at a time; whatever is actually playing wins, and video beats
   // audio when both are. Ignored when `source` resolves to "browser".
   tv: {
-    enabled: false,
+    enabled: true,
 
     // Discord builds the card header from the *application* name, and the
     // handshake binds one application per connection. Leave this empty and
     // TV shows are announced through the Apple Music application, so the
-    // header reads "Watching Apple Music". Create a second Discord
-    // application named "Apple TV" and paste its Application ID here to get
-    // the right header; yanpresence reconnects as it switches between them.
-    clientId: '',
+    // header reads "Watching Apple Music". The shared Apple TV ID gives the
+    // right header automatically; yanpresence reconnects as it switches.
+    clientId: SHARED_DEFAULTS.tvClientId,
 
     // Cosmetic: echoed back to clients that display it. The header itself
     // always comes from the application's name in the portal.
@@ -265,14 +269,23 @@ export const DEFAULTS = {
   // Example command (Cloudflare R2 via rclone):
   //   "rclone copyto {file} r2:art/{name} >&2 && echo https://cdn.example.com/{name}"
   hosting: {
-    // "s3" | "command" | "webhook"
+    // "shared" (managed artwork service) | "s3" | "command" | "webhook"
     //
     // NOTE: "webhook" cannot serve Rich Presence assets. The upload works and
     // the file is visible in the channel, but cdn.discordapp.com attachment
     // URLs carry a mandatory signed query string and Discord will not render
     // them as an asset -- you get the grey "?" placeholder. Use "s3" or
     // "command" with a host that serves plain, unsigned URLs.
-    mode: 's3',
+    mode: 'shared',
+
+    // Upload images through the managed gateway; bucket credentials stay on
+    // the server. Override this only when running your own gateway.
+    shared: {
+      endpoint: SHARED_DEFAULTS.endpoint,
+      publicBaseUrl: SHARED_DEFAULTS.publicBaseUrl,
+      maxBytes: SHARED_DEFAULTS.maxBytes,
+      timeoutMs: 60_000,
+    },
 
     // S3-compatible storage, signed natively (no rclone or aws-cli needed).
     // For Cloudflare R2:
@@ -356,8 +369,8 @@ export const DEFAULTS = {
     // Full-length high-resolution pulls are genuinely slow; this is generous.
     timeoutMs: 5 * 60 * 1000,
 
-    ffmpegPath: 'ffmpeg',
-    ffprobePath: 'ffprobe',
+    ffmpegPath: bundledTool('ffmpeg'),
+    ffprobePath: bundledTool('ffprobe'),
     img2webpPath: 'img2webp',
 
     // GPU encoding -- see src/gpu.js for the measurements behind every word of
@@ -408,7 +421,7 @@ export const DEFAULTS = {
   },
 
   // Upload embedded artwork from local library files (not in Apple's catalog)
-  // through the same webhook so they still get album art. Needs a webhook URL.
+  // through the configured hosting service so they still get album art.
   uploadLocalArtwork: true,
 
   logLevel: 'info',
@@ -469,6 +482,9 @@ export function loadConfig() {
   }
 
   const config = deepMerge(deepMerge(DEFAULTS, loaded), fromEnv());
+  // Older --init templates left this empty. They should benefit from the
+  // public application too, without rewriting the user's configuration.
+  if (!String(config.clientId ?? '').trim()) config.clientId = DEFAULTS.clientId;
   config.__source = source;
 
   fs.mkdirSync(CACHE_DIR, { recursive: true });
@@ -479,9 +495,8 @@ export function validateConfig(config) {
   const problems = [];
   if (!/^\d{17,20}$/.test(String(config.clientId || ''))) {
     problems.push(
-      'clientId is missing or malformed. Create an application at ' +
-        'https://discord.com/developers/applications, name it "Apple Music", ' +
-        'and copy its Application ID into your config.'
+      'clientId is malformed. Remove the clientId override to use the shared Apple Music ' +
+        'application, or supply a valid Discord Application ID.'
     );
   }
   if (!['auto', 'apple-apps', 'browser'].includes(config.source)) {
@@ -506,8 +521,23 @@ export function validateConfig(config) {
   if (!['name', 'state', 'details'].includes(config.statusDisplay)) {
     problems.push(`statusDisplay must be one of name|state|details (got ${config.statusDisplay})`);
   }
-  if (!['s3', 'command', 'webhook'].includes(config.hosting.mode)) {
-    problems.push(`hosting.mode must be "s3", "command" or "webhook" (got ${config.hosting.mode})`);
+  if (!['shared', 's3', 'command', 'webhook'].includes(config.hosting.mode)) {
+    problems.push(`hosting.mode must be "shared", "s3", "command" or "webhook" (got ${config.hosting.mode})`);
+  }
+  if (config.hosting.mode === 'shared') {
+    for (const field of ['endpoint', 'publicBaseUrl']) {
+      const value = config.hosting.shared?.[field];
+      if (!value && field === 'endpoint') continue;
+      try {
+        const url = new URL(value);
+        if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) throw new Error();
+      } catch {
+        problems.push(`hosting.shared.${field} must be an HTTPS URL without credentials, a query or a fragment.`);
+      }
+    }
+    if (!Number.isSafeInteger(config.hosting.shared?.maxBytes) || config.hosting.shared.maxBytes <= 0) {
+      problems.push('hosting.shared.maxBytes must be a positive integer.');
+    }
   }
   if (!['webp', 'avif', 'gif'].includes(config.animatedArtwork.format)) {
     problems.push(

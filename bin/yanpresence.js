@@ -6,7 +6,7 @@ import process from 'node:process';
 
 import { AppleCatalog } from '../src/catalog.js';
 import { ArtworkHost, installHint } from '../src/artwork.js';
-import { CACHE_DIR, LOG_FILE, PROJECT_ROOT, SUPPORT_DIR, configPaths, loadConfig, validateConfig } from '../src/config.js';
+import { CACHE_DIR, LOG_FILE, PROJECT_ROOT, SUPPORT_DIR, loadConfig, validateConfig } from '../src/config.js';
 import { DiscordRPC } from '../src/discord.js';
 import { createSources, hasAppleApps, resolveSourceKind } from '../src/sources.js';
 import { episodeCode } from '../src/tv.js';
@@ -137,7 +137,7 @@ async function cmdInit() {
   const example = fs.readFileSync(path.join(PROJECT_ROOT, 'config.example.json'), 'utf8');
   fs.writeFileSync(target, example);
   console.log(`Wrote ${target}`);
-  console.log('Fill in "clientId" with your Discord application ID, then run: yanpresence');
+  console.log('Ready to run: yanpresence. Shared Discord applications and artwork hosting are the defaults.');
 }
 
 function cmdCache() {
@@ -748,9 +748,7 @@ async function cmdDoctor(config) {
   );
 
   rows.push(['info', 'config', config.__source ?? `none found (using defaults)`]);
-  if (!config.__source) {
-    warn('config', `looked in:\n      ${configPaths().join('\n      ')}`);
-  }
+  // No config is needed: installers run directly with shared defaults.
 
   const problems = validateConfig(config);
   if (problems.length) problems.forEach((p) => bad('config', p));
@@ -815,7 +813,9 @@ async function cmdDoctor(config) {
   } else if (!artwork.canHost) {
     warn(
       'artwork hosting',
-      config.hosting.mode === 's3'
+      config.hosting.mode === 'shared'
+        ? 'Shared artwork service is not configured in this build; album art will be static.'
+        : config.hosting.mode === 's3'
         ? 'hosting.mode is "s3" but the s3 block is incomplete (needs endpoint, bucket,\n' +
           '      accessKeyId, secretAccessKey, publicBaseUrl) — album art will be static.'
         : config.hosting.mode === 'command'
@@ -876,7 +876,18 @@ async function cmdDoctor(config) {
         rows.push(['info', 'GPU encoding', `${format} has no hardware encoder; only decode is accelerated`]);
       }
     }
-    if (config.hosting.mode === 's3') {
+    if (config.hosting.mode === 'shared') {
+      const probe = await artwork
+        .uploadViaShared(fs.readFileSync(path.join(PROJECT_ROOT, 'assets', 'blank.png')), 'image/png')
+        .then(async (url) => {
+          const res = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(15000) });
+          return { url, readable: res.ok };
+        })
+        .catch((err) => ({ error: err.message }));
+      if (probe.error) bad('artwork hosting', `shared upload failed — ${probe.error}`);
+      else if (!probe.readable) bad('artwork hosting', 'shared upload succeeded but the artwork is not publicly readable');
+      else ok('artwork hosting', `shared — uploaded and publicly readable at ${new URL(probe.url).host}`);
+    } else if (config.hosting.mode === 's3') {
       // Prove the credentials by actually round-tripping a small object: a
       // config that merely looks complete tells you nothing.
       const probe = await artwork
