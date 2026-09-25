@@ -1,0 +1,95 @@
+name: Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - 'bin/**'
+      - 'src/**'
+      - 'scripts/**'
+      - 'windows/**'
+      - 'installer/**'
+      - 'assets/**'
+      - 'package*.json'
+      - 'test/**'
+      - '.github/workflows/windows-installer.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Match release tag to package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: powershell
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($env:RELEASE_TAG -ne "v$version") { throw "Tag $env:RELEASE_TAG must match package.json version v$version" }
+      - name: Build pinned Windows installer
+        shell: powershell
+        run: ./scripts/build-windows.ps1 -BootstrapCompiler
+      - name: Test with bundled Node
+        shell: powershell
+        run: |
+          & ./.build/windows-x64/runtime/node.exe --test test/*.test.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install, upgrade, and uninstall isolated test identity
+        shell: powershell
+        run: ./scripts/test-windows-package.ps1
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: yanpresence-windows-x64
+          path: |
+            dist/yanpresence-*-windows-x64-setup.exe
+            dist/yanpresence-*-windows-x64-setup.exe.sha256
+          if-no-files-found: error
+      - name: Upload installer test logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-installer-test-logs
+          path: .build/Installer Smoke */*.log
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: yanpresence-windows-x64
+          path: dist
+      # The website links to releases/latest/download/<name>, which GitHub
+      # resolves only for an exact asset name. The versioned file changes name
+      # every release, so ship the same bytes under one name that never does.
+      - name: Add a version-less copy for the website's download link
+        run: |
+          shopt -s nullglob
+          versioned=(dist/yanpresence-*-windows-x64-setup.exe)
+          if [ "${#versioned[@]}" -ne 1 ]; then
+            echo "Expected exactly one versioned installer, found ${#versioned[@]}: ${versioned[*]}" >&2
+            exit 1
+          fi
+          cp "${versioned[0]}" dist/yanpresence-windows-x64-setup.exe
+          (cd dist && sha256sum yanpresence-windows-x64-setup.exe > yanpresence-windows-x64-setup.exe.sha256)
+      - name: Attach installer to a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --title "yanpresence $TAG" --generate-notes
+          fi
+          gh release upload "$TAG" dist/* --clobber

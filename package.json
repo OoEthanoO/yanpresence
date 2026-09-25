@@ -17,7 +17,9 @@
     "uninstall-service": "bash systemd/uninstall.sh",
     "install-windows": "powershell -NoProfile -ExecutionPolicy Bypass -File windows/install.ps1",
     "uninstall-windows": "powershell -NoProfile -ExecutionPolicy Bypass -File windows/uninstall.ps1",
-    "make-icon": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-icon.ps1"
+    "make-icon": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-icon.ps1",
+    "build:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1 -BootstrapCompiler",
+    "test:windows-package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-windows-package.ps1"
   },
   "engines": {
     "node": ">=18"

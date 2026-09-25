@@ -1,0 +1,19 @@
+yanpresence Windows runtime components
+
+Node.js
+Copyright Node.js contributors. Node.js is distributed under the MIT license
+and includes third-party components. The full notices are included in
+runtime/NODE-LICENSE.txt.
+Source: https://github.com/nodejs/node/tree/v24.21.0
+Binary and checksums: https://nodejs.org/dist/v24.21.0/
+
+FFmpeg / ffprobe
+These separate command-line programs are built by Gyan Doshi and distributed
+under GPLv3. The full license is in runtime/ffmpeg/LICENSE.txt, and the upstream
+build configuration and library versions are in runtime/ffmpeg/README.txt.
+Builds and source references: https://www.gyan.dev/ffmpeg/builds/
+Exact binary release: https://github.com/GyanD/codexffmpeg/releases/tag/9.0.2
+FFmpeg source: https://github.com/FFmpeg/FFmpeg/tree/n9.0.2
+
+The installer contains unmodified Node.js and FFmpeg executables. Dependency
+versions, download URLs and SHA-256 hashes are in runtime/dependencies.json.

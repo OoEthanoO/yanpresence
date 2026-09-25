@@ -17,6 +17,10 @@ $root = Split-Path -Parent $PSScriptRoot
 $entry = Join-Path $root 'bin\yanpresence.js'
 
 function Find-Node {
+  # The installer ships its own runtime. Do not accidentally use an older
+  # system Node, or require the user to install developer tools.
+  $bundled = Join-Path $root 'runtime\node.exe'
+  if (Test-Path -LiteralPath $bundled) { return $bundled }
   $onPath = Get-Command node.exe -ErrorAction SilentlyContinue
   if ($onPath) { return $onPath.Source }
 
@@ -25,7 +29,6 @@ function Find-Node {
   # user only is not on the machine PATH at all.
   $candidates = @(
     (Join-Path $env:ProgramFiles 'nodejs\node.exe'),
-    (Join-Path ${env:ProgramFiles(x86)} 'nodejs\node.exe'),
     (Join-Path $env:LOCALAPPDATA 'Programs\nodejs\node.exe'),
     (Join-Path $env:APPDATA 'nvm\node.exe')
   )
@@ -38,7 +41,7 @@ if (-not $node) {
   # There is no console to print to, so the only way to say anything is a box.
   Add-Type -AssemblyName System.Windows.Forms
   [System.Windows.Forms.MessageBox]::Show(
-    "yanpresence could not find node.exe.`n`nInstall Node.js 18 or newer from https://nodejs.org and try again.",
+    "yanpresence could not find its runtime.`n`nRun the yanpresence installer again to repair the installation.`n`nFor a source checkout, install Node.js 18 or newer from https://nodejs.org.",
     'yanpresence', 'OK', 'Error') | Out-Null
   exit 1
 }
@@ -46,4 +49,9 @@ if (-not $node) {
 # -WindowStyle Hidden on a console application means the console it is given is
 # created hidden, which is the difference between a background process and a
 # black window on the taskbar.
-Start-Process -FilePath $node -ArgumentList @($entry, '--tray') -WorkingDirectory $root -WindowStyle Hidden
+$bundledTools = Join-Path $root 'runtime\ffmpeg\bin'
+if (Test-Path -LiteralPath $bundledTools) { $env:PATH = "$bundledTools;$env:PATH" }
+
+# Start-Process joins array arguments without adding quotes. Quote the entry
+# explicitly so user names and install locations containing spaces work.
+Start-Process -FilePath $node -ArgumentList ('"{0}" --tray' -f $entry) -WorkingDirectory $root -WindowStyle Hidden
