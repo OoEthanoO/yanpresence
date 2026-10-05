@@ -69,7 +69,7 @@ And expanded, when someone clicks into your profile:
 ## Install on Windows
 
 [**Download the installer**](https://github.com/OoEthanoO/yanpresence/releases/latest/download/yanpresence-windows-x64-setup.exe)
-(also on [the website](https://yanpresence.ethanyanxu.com/#get)), run it, and
+(also on [the website](https://presence.ethanyanxu.com/#get)), run it, and
 finish the installer. It is not code-signed yet, so Windows SmartScreen may
 warn you: choose **More info → Run anyway**. It
 includes Node.js, ffmpeg and ffprobe, installs for your Windows user without
@@ -1185,7 +1185,7 @@ art remains available while the animated cover cannot be hosted.
 
 ## Website
 
-<https://yanpresence.ethanyanxu.com> is [`docs/index.html`](docs/index.html),
+<https://presence.ethanyanxu.com> is [`docs/index.html`](docs/index.html),
 served from **finprint-host**, the home Windows laptop, by the Caddy instance
 that already serves the other co-hosted sites. It used to be on Vercel, until
 Vercel disabled the deployment.
@@ -1197,7 +1197,7 @@ directory, adds `version.txt` with the commit, and points Caddy at it. Only
 files are published. Nothing from the repository runs on the host, so the
 deploy scripts change only when you re-run the installer.
 
-A release counts as live only once `https://yanpresence.ethanyanxu.com/version.txt`,
+A release counts as live only once `https://presence.ethanyanxu.com/version.txt`,
 fetched through Caddy with a publicly trusted certificate, returns its commit.
 A release that is not served within 30 seconds is switched back to the
 previous one, and that version of `docs/` is not tried again until `docs/`
@@ -1217,11 +1217,11 @@ can write to because SYSTEM's Caddy loads configuration from it. It clones the
 repository there, registers the task, and runs one deploy pass. Re-running it
 is safe, and is how a newer version of the deploy scripts is installed.
 
-DNS for `ethanyanxu.com` is on Cloudflare. `yanpresence` must be a **DNS-only**
+DNS for `ethanyanxu.com` is on Cloudflare. `presence` must be a **DNS-only**
 `CNAME` to `finprint.ethanyanxu.com`, TTL 60, so it follows that record when
 the home IP changes. Until it is, the zone's wildcard sends the name to Vercel,
 and the task waits. It adds the site to Caddy only once public resolvers answer
-`yanpresence` exactly as they answer `finprint`. Adding it earlier would make
+`presence` exactly as they answer `finprint`. Adding it earlier would make
 Caddy ask Let's Encrypt for a certificate that cannot validate, which counts
 against Let's Encrypt's limit of 5 failed validations per hour and puts Caddy
 on a retry backoff that stretches to hours.
@@ -1240,7 +1240,7 @@ without connecting to the host or changing any live configuration.
 
 | Task | Command (on finprint-host, elevated) |
 |---|---|
-| Which commit is live | `curl.exe -s https://yanpresence.ethanyanxu.com/version.txt` |
+| Which commit is live | `curl.exe -s https://presence.ethanyanxu.com/version.txt` |
 | Deploy now, or see why nothing changed | `powershell -ExecutionPolicy Bypass -File C:\ProgramData\yanpresence\ops\deploy.ps1` |
 | What the task did | `Get-Content C:\ProgramData\yanpresence\logs\deploy.log -Tail 20` |
 | Pin a commit | `Disable-ScheduledTask yanpresence-site-deploy`, then `deploy.ps1 -Ref <sha>` |

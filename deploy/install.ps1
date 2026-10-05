@@ -22,7 +22,7 @@
 [CmdletBinding()]
 param(
     [string]$Root = 'C:\ProgramData\yanpresence',
-    [string]$Domain = 'yanpresence.ethanyanxu.com',
+    [string]$Domain = 'presence.ethanyanxu.com',
     # The record that tracks this connection's address. Domain must be a
     # CNAME to it (or resolve exactly as it does) before the first activation.
     [string]$DnsTarget = 'finprint.ethanyanxu.com',
