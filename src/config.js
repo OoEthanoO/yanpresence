@@ -171,8 +171,8 @@ export const DEFAULTS = {
 
   // Windows-only knobs. Inert everywhere else.
   windows: {
-    // Show a notification-area icon, whose only menu item that does anything
-    // is Quit. Off by default, because a run from a terminal has Ctrl-C and
+    // Show a notification-area icon, whose menu has Quit and the artist photo
+    // switch. Off by default, because a run from a terminal has Ctrl-C and
     // does not need one -- the Start menu shortcut written by
     // `npm run install-windows` passes --tray, since a hidden background
     // process with no way to stop it is not a thing to ship.
@@ -237,10 +237,12 @@ export const DEFAULTS = {
   // encoded at, so both paths deliver the same dimensions.
   artworkSize: 1024,
 
-  // Small badge in the corner of the album art. This one is a Rich Presence
-  // art asset uploaded in the Developer Portal, referenced by its name.
-  showSmallImage: true,
-  smallImageKey: 'applemusic',
+  // The artist's photo, in the small circle Discord draws on the corner of the
+  // album art. It arrives with the catalog match and is served by Apple's CDN,
+  // so it costs no request or upload of its own. A song with no catalog match,
+  // or an artist Apple has no photo of, gets no badge. On Windows the tray
+  // menu switches this, and remembers the choice in preferences.json.
+  artistPhoto: true,
 
   // Shown when there is no album art to display. An empty large image slot,
   // or one pointing at something Discord cannot resolve, renders as Discord's
@@ -456,6 +458,39 @@ function readJson(file) {
   return JSON.parse(stripped);
 }
 
+/**
+ * Choices made from the tray menu, kept apart from config.json.
+ *
+ * The config file is yours: written by hand and commented, and the comments
+ * are stripped to parse it, so writing it back would delete every one. The app
+ * never writes there. What the menu changes lands in this file instead, which
+ * is read after the config and so wins over it.
+ */
+export const PREFERENCES_FILE = path.join(SUPPORT_DIR, 'preferences.json');
+
+// What the file may hold, and as what. Anything else in it is ignored, so it
+// cannot quietly become a second config file.
+const PREFERENCE_TYPES = { artistPhoto: 'boolean' };
+
+export function loadPreferences(file = PREFERENCES_FILE) {
+  let raw;
+  try {
+    raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(isPlainObject(raw) ? raw : {}).filter(
+      ([key, value]) => typeof value === PREFERENCE_TYPES[key]
+    )
+  );
+}
+
+export function savePreferences(changes, file = PREFERENCES_FILE) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify({ ...loadPreferences(file), ...changes }, null, 2)}\n`);
+}
+
 function fromEnv() {
   const env = {};
   if (process.env.YANPRESENCE_CLIENT_ID) env.clientId = process.env.YANPRESENCE_CLIENT_ID;
@@ -481,7 +516,11 @@ export function loadConfig() {
     }
   }
 
-  const config = deepMerge(deepMerge(DEFAULTS, loaded), fromEnv());
+  // The corner badge used to be a portal asset, switched by showSmallImage.
+  // Someone who switched that off asked for no badge, and still gets none.
+  if (loaded?.showSmallImage === false && loaded.artistPhoto === undefined) loaded.artistPhoto = false;
+
+  const config = deepMerge(deepMerge(deepMerge(DEFAULTS, loaded), loadPreferences()), fromEnv());
   // Older --init templates left this empty. They should benefit from the
   // public application too, without rewriting the user's configuration.
   if (!String(config.clientId ?? '').trim()) config.clientId = DEFAULTS.clientId;
@@ -520,6 +559,9 @@ export function validateConfig(config) {
   }
   if (!['name', 'state', 'details'].includes(config.statusDisplay)) {
     problems.push(`statusDisplay must be one of name|state|details (got ${config.statusDisplay})`);
+  }
+  if (typeof config.artistPhoto !== 'boolean') {
+    problems.push(`artistPhoto must be true or false (got ${JSON.stringify(config.artistPhoto)})`);
   }
   if (!['shared', 's3', 'command', 'webhook'].includes(config.hosting.mode)) {
     problems.push(`hosting.mode must be "shared", "s3", "command" or "webhook" (got ${config.hosting.mode})`);

@@ -29,6 +29,8 @@ const LIMITS = {
  *   Bohemian Rhapsody               <- details, links to the song
  *   Queen                           <- state, links to the artist
  *   [album art]                     <- hover shows the album, links to it
+ *   (artist photo)                  <- badge on the art's corner; hover shows
+ *                                      the artist, links to them
  */
 export function buildActivity({ track, state, catalog, artworkUrl, config, startedAt }) {
   const playing = state === 'playing';
@@ -80,9 +82,15 @@ export function buildActivity({ track, state, catalog, artworkUrl, config, start
   }
   if (albumUrl) activity.assets.large_url = albumUrl;
 
-  if (config.showSmallImage && config.smallImageKey) {
-    activity.assets.small_image = config.smallImageKey;
-    activity.assets.small_text = playing ? 'Apple Music' : 'Paused';
+  // --- badge -------------------------------------------------------------
+  // The artist's photo, in the circle Discord draws over the cover's corner.
+  // Apple Music shows artists in circles too, so the photo is framed to suit.
+  // No photo means no badge: nothing stands in for it.
+  const artistPhoto = config.artistPhoto ? catalog?.artistArtworkUrl : null;
+  if (artistPhoto && artistPhoto.length <= LIMITS.asset) {
+    activity.assets.small_image = artistPhoto;
+    activity.assets.small_text = activity.state;
+    if (artistUrl) activity.assets.small_url = artistUrl;
   }
 
   // --- progress ---------------------------------------------------------

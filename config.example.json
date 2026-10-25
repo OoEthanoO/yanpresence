@@ -61,12 +61,12 @@
 
   // Windows only, and inert everywhere else.
   //
-  // tray: a notification-area icon whose menu has Quit. Off here because a run
-  //   from a terminal has Ctrl-C and does not need one — the Start menu
-  //   shortcut written by `npm run install-windows` passes --tray itself, so
-  //   turn this on only if you want the icon for terminal runs too. Windows 11
-  //   hides new tray icons behind the ^ arrow; drag it onto the taskbar to
-  //   keep it in view.
+  // tray: a notification-area icon whose menu has Quit and the artist photo
+  //   switch. Off here because a run from a terminal has Ctrl-C and does not
+  //   need one — the Start menu shortcut written by `npm run install-windows`
+  //   passes --tray itself, so turn this on only if you want the icon for
+  //   terminal runs too. Windows 11 hides new tray icons behind the ^ arrow;
+  //   drag it onto the taskbar to keep it in view.
   //
   // appIds: prefixes of the identifiers the two Store apps publish their media
   //   sessions under. Only worth touching if Apple reissues them under a
@@ -212,8 +212,12 @@
   "pauseClearDelayMs": null,
 
   "showWhenPaused": false,
-  "showSmallImage": true,
-  "smallImageKey": "applemusic",
+
+  // The artist's photo, in the small circle on the corner of the album art.
+  // On Windows the tray menu switches it too, and remembers the choice in
+  // preferences.json beside this file, which wins over the value here.
+  "artistPhoto": true,
+
   "placeholderImageKey": "blank",
   "linkButtons": false,
   "artworkSize": 1024,

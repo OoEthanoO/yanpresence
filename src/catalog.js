@@ -14,6 +14,10 @@ const ITUNES_BASE = 'https://itunes.apple.com';
 const POSITIVE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const NEGATIVE_TTL_MS = 6 * 60 * 60 * 1000;
 
+// The artist photo fills Discord's small corner badge, which is drawn at a
+// fraction of the cover's size, so it needs nothing like the cover's 1024px.
+const ARTIST_PHOTO_SIZE = 512;
+
 /* ------------------------------------------------------------------ *
  * Text normalization / matching
  * ------------------------------------------------------------------ */
@@ -308,13 +312,19 @@ export class AppleCatalog {
 
     if (this.memo.has(key)) return this.memo.get(key);
 
+    // A match cached before the artist photo existed is looked up again to
+    // get one, but kept if that fails rather than traded for a miss.
+    let fallback = null;
     const cached = this.disk[key];
     if (cached) {
       const ttl = cached.result ? POSITIVE_TTL_MS : NEGATIVE_TTL_MS;
       if (Date.now() - cached.ts < ttl) {
         const result = this.withCurrentArtworkSize(cached.result);
-        if (result) this.memo.set(key, result);
-        return result;
+        if (!predatesArtistPhoto(result)) {
+          if (result) this.memo.set(key, result);
+          return result;
+        }
+        fallback = result;
       }
     }
 
@@ -326,12 +336,13 @@ export class AppleCatalog {
         return null;
       })
       .then((result) => {
+        this.inflight.delete(key);
+        if (!result && fallback) return fallback;
         // Only misses expire, and they expire on disk. Memoizing a null would
         // pin a transient network failure for the life of the process.
         if (result) this.memo.set(key, result);
         this.disk[key] = { ts: Date.now(), result };
         this.saveDisk();
-        this.inflight.delete(key);
         return result;
       });
 
@@ -411,6 +422,10 @@ export class AppleCatalog {
       songUrl: attrs.url ?? null,
       artistName: attrs.artistName ?? track.artist,
       artistUrl: artistRel?.attributes?.url ?? null,
+      // Already in the response: `include` brings the artist's own artwork
+      // along with its URL, so the badge costs no request of its own. Null for
+      // an artist Apple has no photo of.
+      artistArtworkUrl: artistPhotoAt(artistRel?.attributes?.artwork),
       albumName: attrs.albumName ?? track.album,
       albumId: albumRel?.id ?? null,
       albumUrl: albumRel?.attributes?.url ?? null,
@@ -560,6 +575,8 @@ export class AppleCatalog {
       songUrl: stripItunesParams(item.trackViewUrl),
       artistName: item.artistName ?? track.artist,
       artistUrl: stripItunesParams(item.artistViewUrl),
+      // iTunes Search carries no artist images.
+      artistArtworkUrl: null,
       albumName: item.collectionName ?? track.album,
       albumId: item.collectionId ? String(item.collectionId) : null,
       albumUrl: stripItunesParams(item.collectionViewUrl),
@@ -571,6 +588,30 @@ export class AppleCatalog {
       durationSec: item.trackTimeMillis ? item.trackTimeMillis / 1000 : 0,
     };
   }
+}
+
+/**
+ * The artist's own image at badge size, or null when Apple has none.
+ *
+ * Apple fills that gap with one of the artist's album covers, framed on a
+ * plain backdrop: a third of the artists across a broad sample of searches.
+ * The stand-in is marked by the "ac" crop code, and in the badge it would put
+ * a second, different cover on the corner of the real one.
+ */
+function artistPhotoAt(artwork) {
+  if (!artwork?.url) return null;
+  if (artwork.defaultCropCode === 'ac' || /\{w\}x\{h\}ac\./.test(artwork.url)) return null;
+  return artworkAt(artwork.url, ARTIST_PHOTO_SIZE);
+}
+
+/**
+ * True for a match cached before the artist photo existed. Those have no field
+ * for it at all, as opposed to null for an artist with no photo. Treating them
+ * as stale is what gets a song played before the upgrade its photo now, rather
+ * than when its entry ages out a month later.
+ */
+function predatesArtistPhoto(result) {
+  return Boolean(result) && !('artistArtworkUrl' in result);
 }
 
 function stripItunesParams(url) {

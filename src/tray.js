@@ -18,16 +18,22 @@ const ICON = path.join(PROJECT_ROOT, 'assets', 'yanpresence.ico');
  * Windows shortcut -- it has no console and no window, and a background
  * process a user cannot stop without Task Manager is not something to ship.
  * So this puts an icon in the tray whose menu has a Quit that shuts the app
- * down properly, clearing the presence with Discord on the way out.
+ * down properly, clearing the presence with Discord on the way out. With no
+ * window to hold settings, the menu also carries the one worth changing
+ * without opening a config file: whether the card shows the artist's photo.
  *
  * The icon itself lives in a PowerShell child running a WinForms message loop,
- * because a message loop is not something Node can host. It reports the click
+ * because a message loop is not something Node can host. It reports clicks
  * back on stdout; the status text goes the other way through a file it polls
  * (see scripts/tray.ps1 for why not stdin).
  */
 export class Tray {
-  constructor({ onQuit, logFile = '' } = {}) {
+  constructor({ onQuit, onArtistPhoto, artistPhoto = true, logFile = '' } = {}) {
     this.onQuit = onQuit;
+    this.onArtistPhoto = onArtistPhoto;
+    // Kept current as the menu reports changes, so an icon started again
+    // shows the switch where the user last left it.
+    this.artistPhoto = artistPhoto;
     this.logFile = logFile;
     this.statusFile = path.join(os.tmpdir(), `yanpresence-tray-${process.pid}.txt`);
     this.child = null;
@@ -48,7 +54,8 @@ export class Tray {
       // control surface and it is not worth leaving to a default.
       ['-STA', ...psArgs(TRAY_SCRIPT, '-ParentPid', String(process.pid), '-StatusFile', this.statusFile,
         ...(fs.existsSync(ICON) ? ['-IconFile', ICON] : []),
-        ...(this.logFile ? ['-LogFile', this.logFile] : []))],
+        ...(this.logFile ? ['-LogFile', this.logFile] : []),
+        ...(this.onArtistPhoto ? ['-ArtistPhoto', this.artistPhoto ? 'on' : 'off'] : []))],
       { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }
     );
 
@@ -86,6 +93,9 @@ export class Tray {
       } else if (line === 'quit') {
         log.info('Quit from the tray icon');
         this.onQuit?.();
+      } else if (line === 'artist-photo on' || line === 'artist-photo off') {
+        this.artistPhoto = line === 'artist-photo on';
+        this.onArtistPhoto?.(this.artistPhoto);
       }
     }
   }

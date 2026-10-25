@@ -53,6 +53,30 @@ test('anything else the icon says is ignored, not acted on', () => {
   tray.stop();
 });
 
+test('the artist photo switch reports where it was left', () => {
+  const seen = [];
+  const tray = new Tray({ onQuit: () => {}, onArtistPhoto: (on) => seen.push(on), artistPhoto: true });
+
+  tray.onData('artist-photo off\n');
+  tray.onData('artist-photo on\nartist-photo off\n');
+  assert.deepEqual(seen, [false, true, false]);
+  // Kept, so an icon started again shows the switch where it was left rather
+  // than where the app started.
+  assert.equal(tray.artistPhoto, false);
+
+  // Only the two exact lines count.
+  tray.onData('artist-photo\nartist-photo maybe\n');
+  assert.deepEqual(seen, [false, true, false]);
+
+  tray.stop();
+});
+
+test('without a handler the switch is ignored, not fatal', () => {
+  const tray = new Tray({ onQuit: () => {} });
+  assert.doesNotThrow(() => tray.onData('artist-photo off\n'));
+  tray.stop();
+});
+
 test('the status file carries a tooltip and a menu line', () => {
   const tray = new Tray({ onQuit: () => {} });
   tray.setStatus('yanpresence — Be Her', 'Listening to Be Her');

@@ -14,8 +14,7 @@ const CONFIG = {
   activityName: 'Apple Music',
   statusDisplay: 'details',
   placeholderImageKey: 'blank',
-  showSmallImage: true,
-  smallImageKey: 'applemusic',
+  artistPhoto: true,
   linkButtons: false,
   artworkSize: 1024,
 };
@@ -111,13 +110,37 @@ test('a missing artist still produces a valid payload', () => {
   assert.equal(a.state, 'Unknown Artist');
 });
 
-test('the album is the hover text, and the small badge is opt-out', () => {
+test('the album is the hover text on the cover', () => {
   assert.equal(build().assets.large_text, 'Dandelion');
-  assert.equal(build().assets.small_image, 'applemusic');
-  assert.equal(
-    build({ config: { ...CONFIG, showSmallImage: false } }).assets.small_image,
-    undefined
-  );
+});
+
+const WITH_PHOTO = {
+  artistUrl: 'https://music.apple.com/us/artist/2',
+  artistArtworkUrl: 'https://is1-ssl.mzstatic.com/image/thumb/AMCArtistImages/x.png/512x512bb.jpg',
+};
+
+test("the badge is the artist's photo, naming and linking the artist", () => {
+  const a = build({ catalog: WITH_PHOTO });
+  assert.equal(a.assets.small_image, WITH_PHOTO.artistArtworkUrl);
+  assert.equal(a.assets.small_text, 'Ella Langley');
+  assert.equal(a.assets.small_url, WITH_PHOTO.artistUrl);
+});
+
+test('no photo, or the photo switched off, means no badge at all', () => {
+  const catalog = WITH_PHOTO;
+  // Nothing stands in for the photo, so these all leave the corner bare --
+  // hover text and link included, since they would hang off nothing.
+  const bare = [
+    build({ catalog, config: { ...CONFIG, artistPhoto: false } }),
+    build({ catalog: { ...catalog, artistArtworkUrl: null } }),
+    build({ catalog: { ...catalog, artistArtworkUrl: `https://example.com/${'a'.repeat(320)}.jpg` } }),
+    build(),
+  ];
+  for (const a of bare) {
+    assert.equal(a.assets.small_image, undefined);
+    assert.equal(a.assets.small_text, undefined);
+    assert.equal(a.assets.small_url, undefined);
+  }
 });
 
 test('a pause on the web player comes down fast; Music.app is given the benefit of the doubt', async () => {

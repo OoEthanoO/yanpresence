@@ -116,6 +116,16 @@ export class YanPresence {
     this.rpc.destroy();
   }
 
+  /**
+   * Switches the artist photo on the card, as the tray menu does. Applied to
+   * whatever is showing now, rather than waiting for the next song.
+   */
+  setArtistPhoto(on) {
+    if (this.config.artistPhoto === on) return;
+    this.config.artistPhoto = on;
+    this.render();
+  }
+
   /* ------------------------------------------------------------------ */
 
   /* ---- TV.app ------------------------------------------------------- */

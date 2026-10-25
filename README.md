@@ -25,7 +25,7 @@ And expanded, when someone clicks into your profile:
   │            │   Be Her            ← clickable → the song on Apple Music
   │ album art  │   Ella Langley      ← clickable → the artist
   │  1024×1024 │   ▓▓▓▓▓░░░░░ 1:04   ← live progress
-  └────────────┘
+  └─────────(●)┘                     ← the artist's photo, clickable → the artist
      ↑ hover shows the album, click opens it
 ```
 
@@ -57,8 +57,13 @@ And expanded, when someone clicks into your profile:
 - **Animated album art** where Apple has published motion artwork — the *full*
   loop at source framerate, transcoded from Apple's HLS master to animated AVIF
   (see [Animated artwork](#animated-artwork)).
-- **Three clickable links.** Song → `details_url`, artist → `state_url`,
-  album → the artwork's `large_url`. All point at `music.apple.com`.
+- **The artist's photo** in the small circle on the cover's corner, where
+  Apple Music has one. It comes with the catalog match and is served straight
+  from Apple's CDN. Switch it off from the tray menu on Windows, or with
+  `artistPhoto: false`.
+- **Four clickable links.** Song → `details_url`, artist → `state_url`,
+  album → the artwork's `large_url`, and the artist again from the photo's
+  `small_url`. All point at `music.apple.com`.
 - **Live progress bar**, with seek detection — scrub the track and the bar
   follows.
 - **Nothing shown while paused.** Pause and the status disappears, the same way
@@ -78,9 +83,9 @@ by default. Leave **Launch yanpresence** checked on the final screen to start
 immediately.
 
 Open the Discord desktop app and play something in Apple Music or Apple TV.
-yanpresence runs in the notification area; right-click its icon to open the log
-or quit. You do not need a terminal, a Discord application, a cloud account,
-storage credentials, or a config file.
+yanpresence runs in the notification area; right-click its icon to switch the
+artist photo, open the log, or quit. You do not need a terminal, a Discord
+application, a cloud account, storage credentials, or a config file.
 
 Every installer is on [GitHub releases](https://github.com/OoEthanoO/yanpresence/releases),
 under two names with identical bytes: `yanpresence-<version>-windows-x64-setup.exe`,
@@ -265,8 +270,8 @@ application named **Apple TV** and set `tv.clientId`. Discord builds the card
 header from these application names.
 
 Under **Rich Presence → Art Assets**, upload [`assets/blank.png`](assets/blank.png)
-as **`blank`** for the empty-cover fallback. Optionally upload an Apple Music
-glyph as **`applemusic`** for the small badge, or set `showSmallImage: false`.
+as **`blank`** for the empty-cover fallback. Nothing else needs uploading: the
+artist photo in the small badge comes from Apple's CDN.
 
 ### Use your own artwork storage
 
@@ -599,13 +604,12 @@ macOS, `%LOCALAPPDATA%\yanpresence\cache` on Windows, and
 | `browser.mpris.enabled` | `true` | Read players off the session bus. Identifies Apple Music by itself in Firefox. |
 | `browser.mpris.players` | `{}` | Map an MPRIS bus name fragment to `music` / `tv` / `ignore`, for browsers that publish no page URL. |
 | `statusDisplay` | `"details"` | Which field lands on your status line: `details` (song), `state` (artist, Spotify's choice), `name`. |
-| `windows.tray` | `false` | Windows: show a notification-area icon with a Quit item. The Start menu shortcut passes `--tray` itself. See [Windows](#windows). |
+| `windows.tray` | `false` | Windows: show a notification-area icon with Quit and the artist photo switch. The Start menu shortcut passes `--tray` itself. See [Windows](#windows). |
 | `windows.appIds.music` | `"AppleInc.AppleMusicWin"` | Windows: AUMID prefix of the app whose media session is Apple Music. |
 | `windows.appIds.tv` | `"AppleInc.AppleTVWin"` | Windows: the same, for Apple TV — which has never answered, since that app publishes no session. Kept so a future version that does is noticed. |
 | `windows.tvUiAutomation` | `true` | Windows: read the Apple TV app through UI Automation, the only way it can be read. See [Apple TV on Windows](#apple-tv-on-windows). |
 | `artworkSize` | `1024` | Square px requested from Apple's CDN. |
-| `showSmallImage` | `true` | Small corner badge. |
-| `smallImageKey` | `"applemusic"` | Name of the Art Asset uploaded in the portal. |
+| `artistPhoto` | `true` | The artist's photo in the small corner badge. No photo, no badge. On Windows the tray menu switches it and remembers the choice in `preferences.json` beside `config.json`, which wins over this value. The old `showSmallImage` and `smallImageKey` are ignored, except that `showSmallImage: false` still means no badge. |
 | `placeholderImageKey` | `"blank"` | Portal asset shown when there's no album art. Shared applications include it; upload `assets/blank.png` only for your own application. `null` leaves the slot empty. |
 | `linkButtons` | `false` | Also attach classic Rich Presence buttons — a fallback for older clients that don't render `details_url`/`state_url`/`large_url`. |
 | `showWhenPaused` | `false` | Keep the presence up while paused. Off by default — a paused track isn't something you're listening to. When on, the progress bar is dropped. |
@@ -788,10 +792,17 @@ launcher passes `--tray` and you get a notification-area icon:
   │ yanpresence             │  ← greyed-out header
   │ Listening to Be Her …   │  ← what the card currently says
   │ ─────────────────────── │
+  │ ✓ Show artist photo     │  ← the badge on the cover's corner
+  │ ─────────────────────── │
   │ Open log                │
   │ Quit yanpresence        │
   └─────────────────────────┘
 ```
+
+**Show artist photo** puts the artist's photo in the badge on the cover's
+corner, or takes it off. The card changes straight away, and the choice is
+remembered in `%APPDATA%\yanpresence\preferences.json`, so it survives a
+restart and wins over `artistPhoto` in `config.json`.
 
 **Quit** shuts the app down properly — it clears the presence with Discord on
 the way out rather than leaving a stale "Listening to…" behind. Hovering shows
@@ -823,6 +834,7 @@ exits, however it exits, which a PID file could not promise.
 |---|---|
 | Installed app | `%LOCALAPPDATA%\Programs\yanpresence\` |
 | Config | `%APPDATA%\yanpresence\config.json` (optional) |
+| Tray menu choices | `%APPDATA%\yanpresence\preferences.json` (written by the app) |
 | Caches | `%LOCALAPPDATA%\yanpresence\cache\` |
 | Log | `%LOCALAPPDATA%\yanpresence\cache\yanpresence.log` |
 

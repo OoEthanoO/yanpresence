@@ -6,7 +6,8 @@
 # icon is not decoration, it is the quit button.
 #
 # Speaks two ways to the Node process that spawned it:
-#   out  a line on stdout -- "quit" when the menu item is clicked.
+#   out  a line on stdout -- "quit" when Quit is clicked, and "artist-photo on"
+#        or "artist-photo off" when the artist photo item is switched.
 #   in   a status file it polls, whose first line becomes the tooltip and
 #        whose second becomes the greyed-out line at the top of the menu.
 #
@@ -15,12 +16,15 @@
 # that is a great deal of machinery for "what song is playing".
 #
 # Usage: tray.ps1 -ParentPid <pid> -StatusFile <path> [-IconFile <path>]
+#                 [-LogFile <path>] [-ArtistPhoto on|off]
 
 param(
   [Parameter(Mandatory = $true)][int]$ParentPid,
   [Parameter(Mandatory = $true)][string]$StatusFile,
   [string]$IconFile = '',
-  [string]$LogFile = ''
+  [string]$LogFile = '',
+  # Where the artist photo switch starts. Left empty, the item is not shown.
+  [string]$ArtistPhoto = ''
 )
 
 Set-StrictMode -Off
@@ -66,6 +70,21 @@ $status.Enabled = $false
 [void]$menu.Items.Add($status)
 
 [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+
+if ($ArtistPhoto) {
+  $photo = New-Object System.Windows.Forms.ToolStripMenuItem('Show artist photo')
+  # Set before the handler is attached, so the starting state is not reported
+  # back as a change.
+  $photo.Checked = ($ArtistPhoto -eq 'on')
+  # The menu ticks itself at the click, so it answers at once; the parent puts
+  # the change on the card and remembers it for next time.
+  $photo.CheckOnClick = $true
+  $photo.Add_CheckedChanged({
+      if ($photo.Checked) { Send-Line 'artist-photo on' } else { Send-Line 'artist-photo off' }
+    })
+  [void]$menu.Items.Add($photo)
+  [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+}
 
 if ($LogFile) {
   $openLog = New-Object System.Windows.Forms.ToolStripMenuItem('Open log')

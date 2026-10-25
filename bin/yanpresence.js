@@ -6,7 +6,15 @@ import process from 'node:process';
 
 import { AppleCatalog } from '../src/catalog.js';
 import { ArtworkHost, installHint } from '../src/artwork.js';
-import { CACHE_DIR, LOG_FILE, PROJECT_ROOT, SUPPORT_DIR, loadConfig, validateConfig } from '../src/config.js';
+import {
+  CACHE_DIR,
+  LOG_FILE,
+  PROJECT_ROOT,
+  SUPPORT_DIR,
+  loadConfig,
+  savePreferences,
+  validateConfig,
+} from '../src/config.js';
 import { DiscordRPC } from '../src/discord.js';
 import { createSources, hasAppleApps, resolveSourceKind } from '../src/sources.js';
 import { episodeCode } from '../src/tv.js';
@@ -36,8 +44,9 @@ Usage:
   yanpresence --help
 
 Options:
-  --tray                      Show a notification-area icon with a Quit item.
-                              Windows only; what the Start menu shortcut passes
+  --tray                      Show a notification-area icon with Quit and an
+                              artist photo switch. Windows only; what the Start
+                              menu shortcut passes
   --log-file [path]           Also write the log to a file. Defaults to
                               ${LOG_FILE}
   --verbose                   Shorthand for --log-level debug
@@ -1225,7 +1234,20 @@ async function main() {
       log.warn('--tray is a Windows notification-area icon and does nothing here; ignoring it.');
     } else {
       const { Tray } = await import('../src/tray.js');
-      tray = new Tray({ onQuit: () => shutdown('Quit from the tray'), logFile });
+      tray = new Tray({
+        onQuit: () => shutdown('Quit from the tray'),
+        onArtistPhoto: (on) => {
+          log.info(`Artist photo ${on ? 'on' : 'off'}, from the tray`);
+          app.setArtistPhoto(on);
+          try {
+            savePreferences({ artistPhoto: on });
+          } catch (err) {
+            log.warn(`Could not remember the artist photo setting: ${err.message}`);
+          }
+        },
+        artistPhoto: config.artistPhoto,
+        logFile,
+      });
       tray.start();
       // What the icon says it is doing. Set from the same place the presence
       // is, so the two can never disagree about what is playing.
