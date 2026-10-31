@@ -584,8 +584,14 @@
           full size, and the song, artist and album all clickable straight back to Apple Music.
         </p>
 
-        <div class="cta-row">
-          <a class="btn btn-primary" data-installer href="https://github.com/OoEthanoO/yanpresence/releases/latest/download/yanpresence-windows-x64-setup.exe">
+        <div class="cta-row" data-downloads>
+          <a class="btn btn-primary" data-download="mac-arm64" href="https://github.com/OoEthanoO/yanpresence/releases/latest/download/yanpresence-macos-arm64.dmg">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Download for Mac
+          </a>
+          <a class="btn btn-primary" data-download="windows" href="https://github.com/OoEthanoO/yanpresence/releases/latest/download/yanpresence-windows-x64-setup.exe">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
@@ -600,7 +606,8 @@
         </div>
 
         <p class="hero-note">
-          Windows 10/11, 64-bit<span data-installer-meta></span> · macOS and Linux
+          macOS 13.5+ on Apple silicon (<a data-download="mac-x64" href="https://github.com/OoEthanoO/yanpresence/releases/latest/download/yanpresence-macos-x64.dmg">Intel</a>)
+          · Windows 10/11, 64-bit<span data-download-meta="windows"></span> · Linux
           <a href="#get">install from source</a>
         </p>
       </div>
@@ -734,9 +741,9 @@
       </div>
 
       <div class="callout">
-        <b>On Windows, just run the installer.</b> It includes the runtime and artwork tools,
-        adds a Start menu entry and starts at login. Quit from the notification-area icon whenever
-        you want; your presence clears when the app exits.
+        <b>On macOS and Windows, just install the app.</b> It includes the runtime and artwork
+        tools and starts at login, living in the menu bar on a Mac and the notification area on
+        Windows. Quit from its icon whenever you want; your presence clears when the app exits.
       </div>
     </div>
   </section>
@@ -791,16 +798,22 @@
       <div>
         <div class="section-head">
           <p class="eyebrow">Download</p>
-          <h2>Run the installer. Press play.</h2>
+          <h2>Install the app. Press play.</h2>
           <p class="lede" style="font-size:var(--step-0)">
-            On Windows, one installer includes everything yanpresence needs. The Apple Music and
-            Apple TV Discord applications and shared artwork hosting are already configured.
-            Just open Discord and play something.
+            On macOS and Windows, one download includes everything yanpresence needs. The Apple
+            Music and Apple TV Discord applications and shared artwork hosting are already
+            configured. Just open Discord and play something.
           </p>
         </div>
 
-        <div class="cta-row" style="margin-top:0">
-          <a class="btn btn-primary" data-installer href="https://github.com/OoEthanoO/yanpresence/releases/latest/download/yanpresence-windows-x64-setup.exe">
+        <div class="cta-row" data-downloads style="margin-top:0">
+          <a class="btn btn-primary" data-download="mac-arm64" href="https://github.com/OoEthanoO/yanpresence/releases/latest/download/yanpresence-macos-arm64.dmg">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Download for Mac
+          </a>
+          <a class="btn btn-primary" data-download="windows" href="https://github.com/OoEthanoO/yanpresence/releases/latest/download/yanpresence-windows-x64-setup.exe">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
@@ -810,16 +823,24 @@
         </div>
 
         <p class="hero-note">
-          <code style="overflow-wrap:anywhere" data-installer-name>yanpresence-windows-x64-setup.exe</code>
-          · Windows 10/11, 64-bit<span data-installer-meta></span><span data-installer-sum hidden>
+          <code style="overflow-wrap:anywhere" data-download-name="mac-arm64">yanpresence-macos-arm64.dmg</code>
+          · Apple silicon<span data-download-meta="mac-arm64"></span><span data-download-sum="mac-arm64" hidden>
+          · <a href="#" target="_blank" rel="noopener">SHA-256</a></span>
+          · for an Intel Mac,
+          <a data-download="mac-x64" href="https://github.com/OoEthanoO/yanpresence/releases/latest/download/yanpresence-macos-x64.dmg"><span data-download-name="mac-x64">yanpresence-macos-x64.dmg</span></a>
+        </p>
+        <p class="hero-note" style="margin-top:0.4rem">
+          <code style="overflow-wrap:anywhere" data-download-name="windows">yanpresence-windows-x64-setup.exe</code>
+          · Windows 10/11, 64-bit<span data-download-meta="windows"></span><span data-download-sum="windows" hidden>
           · <a href="#" target="_blank" rel="noopener">SHA-256</a></span>
         </p>
 
         <h3 style="font-size:var(--step-1);margin-top:2.6rem;margin-bottom:0.9rem">What you need</h3>
         <ul class="reqs">
-          <li><b>Windows 10/11, 64-bit</b>, with Apple Music or Apple TV from the Microsoft Store.</li>
-          <li><b>The Discord desktop app</b>, running with activity sharing enabled.</li>
-          <li><b>macOS and Linux:</b> use the source install with Node.js 18+ and ffmpeg for animated covers.</li>
+          <li><span><b>macOS 13.5 or later</b>, Apple silicon or Intel, with the Music and TV apps.</span></li>
+          <li><span><b>Windows 10/11, 64-bit</b>, with Apple Music or Apple TV from the Microsoft Store.</span></li>
+          <li><span><b>The Discord desktop app</b>, running with activity sharing enabled.</span></li>
+          <li><span><b>Linux:</b> use the source install with Node.js 18+ and ffmpeg for animated covers.</span></li>
         </ul>
         <div class="callout">
           <b>Artwork is public.</b> Animated covers and embedded covers from local tracks are
@@ -930,10 +951,10 @@
 
   const STEPS = {
     mac: [
-      ['Install Node.js and ffmpeg', 'Use Node.js 18+ and ffmpeg with ffprobe. These tools are needed only for source installs.', null],
-      ['Get the source', 'No npm runtime dependencies to install.', CLONE],
-      ['Check the setup', 'Shared Discord applications and artwork hosting are ready without a config. macOS asks for permission to control Music on first run.', 'node bin/yanpresence.js --doctor'],
-      ['Run it', 'Open Discord and Music. Use <code>npm run install-agent</code> to start yanpresence at login.', 'node bin/yanpresence.js'],
+      ['Drag it into Applications', 'Download the disk image with the button on this page — the Intel link if your Mac is not Apple silicon — open it, and drag yanpresence into Applications. Node.js, ffmpeg and ffprobe are included. No administrator access is required.', null],
+      ['Open it, once, from Privacy & Security','It is not notarized yet, so macOS first says <b>“yanpresence” Not Opened</b>. Choose <b>Done</b>, not Move to Trash, then <b>System Settings</b> → <b>Privacy &amp; Security</b> → <b>Open Anyway</b>.', null],
+      ['Allow it to read Music', 'The first time Music or TV plays, macOS asks whether yanpresence may control it. Choose <b>Allow</b>.', null],
+      ['Open Discord and press play', 'yanpresence lives in the menu bar: click its notes to switch the artist photo, open the log or quit. It opens at login; untick <b>Open at Login</b> to stop that.', null],
     ],
     win: [
       ['Run the installer', 'Download it with the button on this page and open it. Node.js, ffmpeg and ffprobe are included. No administrator access is required. The installer is not code-signed yet, so Windows SmartScreen may warn you: choose <b>More info</b> → <b>Run anyway</b>.', null],
@@ -1007,12 +1028,34 @@
   osTabs.forEach((o) => o.setAttribute('aria-selected', String(o.dataset.os === guess)));
   renderSteps(guess);
 
-  /* ---- the installer: version and size from the newest published release ---- */
+  // Both download buttons are primary as written. The one for the visitor's
+  // own platform stays that way and goes first; the other steps back.
+  document.querySelectorAll('[data-downloads]').forEach((row) => {
+    const mac = row.querySelector('[data-download="mac-arm64"]');
+    const win = row.querySelector('[data-download="windows"]');
+    if (!mac || !win) return;
+    if (guess === 'win') {
+      row.prepend(win);
+      mac.classList.replace('btn-primary', 'btn-ghost');
+    } else if (guess === 'mac') {
+      win.classList.replace('btn-primary', 'btn-ghost');
+    }
+  });
+
+  /* ---- the downloads: version and size from the newest published release ---- */
   // The buttons already work without this: releases/latest/download/<name>
-  // always serves the newest published installer. This only adds the version
-  // and size next to them, and follows a release that lacks the version-less
-  // asset to its versioned one. Any failure (rate limit, offline, no release
-  // yet) leaves the page exactly as written.
+  // always serves the newest published file. This adds the version and size
+  // next to them, and follows a release that lacks a version-less asset to
+  // its versioned one. A release with no build for a platform at all -- one
+  // from before that platform had one -- sends its buttons to the releases
+  // page, rather than to a download that would 404. Any other failure (rate
+  // limit, offline, no release yet) leaves the page exactly as written.
+  const DOWNLOADS = {
+    windows: ['yanpresence-windows-x64-setup.exe', /^yanpresence-[\d.]+-windows-x64-setup\.exe$/],
+    'mac-arm64': ['yanpresence-macos-arm64.dmg', /^yanpresence-[\d.]+-macos-arm64\.dmg$/],
+    'mac-x64': ['yanpresence-macos-x64.dmg', /^yanpresence-[\d.]+-macos-x64\.dmg$/],
+  };
+
   (async () => {
     try {
       const res = await fetch('https://api.github.com/repos/OoEthanoO/yanpresence/releases/latest', {
@@ -1021,26 +1064,33 @@
       if (!res.ok) return;
       const release = await res.json();
       const assets = Array.isArray(release.assets) ? release.assets : [];
-      const exe = assets.find((a) => a.name === 'yanpresence-windows-x64-setup.exe')
-        || assets.find((a) => /^yanpresence-[\d.]+-windows-x64-setup\.exe$/.test(a.name));
-      if (!exe) return;
 
-      document.querySelectorAll('[data-installer]').forEach((a) => { a.href = exe.browser_download_url; });
-      document.querySelectorAll('[data-installer-name]').forEach((n) => { n.textContent = exe.name; });
+      for (const [key, [name, versioned]] of Object.entries(DOWNLOADS)) {
+        const file = assets.find((a) => a.name === name) || assets.find((a) => versioned.test(a.name));
+        if (!file) {
+          document.querySelectorAll(`[data-download="${key}"]`).forEach((a) => {
+            a.href = 'https://github.com/OoEthanoO/yanpresence/releases';
+          });
+          continue;
+        }
 
-      const facts = [];
-      if (release.tag_name) facts.push(String(release.tag_name).replace(/^v?/, 'v'));
-      if (exe.size > 0) facts.push(`${Math.round(exe.size / (1024 * 1024))} MB`);
-      document.querySelectorAll('[data-installer-meta]').forEach((s) => {
-        s.textContent = facts.map((f) => ` · ${f}`).join('');
-      });
+        document.querySelectorAll(`[data-download="${key}"]`).forEach((a) => { a.href = file.browser_download_url; });
+        document.querySelectorAll(`[data-download-name="${key}"]`).forEach((n) => { n.textContent = file.name; });
 
-      const sum = assets.find((a) => a.name === `${exe.name}.sha256`);
-      if (sum) {
-        document.querySelectorAll('[data-installer-sum]').forEach((s) => {
-          s.querySelector('a').href = sum.browser_download_url;
-          s.hidden = false;
+        const facts = [];
+        if (release.tag_name) facts.push(String(release.tag_name).replace(/^v?/, 'v'));
+        if (file.size > 0) facts.push(`${Math.round(file.size / (1024 * 1024))} MB`);
+        document.querySelectorAll(`[data-download-meta="${key}"]`).forEach((s) => {
+          s.textContent = facts.map((f) => ` · ${f}`).join('');
         });
+
+        const sum = assets.find((a) => a.name === `${file.name}.sha256`);
+        if (sum) {
+          document.querySelectorAll(`[data-download-sum="${key}"]`).forEach((s) => {
+            s.querySelector('a').href = sum.browser_download_url;
+            s.hidden = false;
+          });
+        }
       }
     } catch {
       /* keep the static links */
