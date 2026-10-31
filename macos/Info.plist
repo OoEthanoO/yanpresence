@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  yanpresence.app's Info.plist. scripts/build-macos.sh fills in the
+  @PLACEHOLDERS@: the version comes from package.json, and the name and
+  identifier change only for the package smoke test, which must never be
+  mistaken for a real installation.
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>@APP_NAME@</string>
+	<key>CFBundleExecutable</key>
+	<string>yanpresence</string>
+	<key>CFBundleIconFile</key>
+	<string>yanpresence</string>
+	<key>CFBundleIdentifier</key>
+	<string>@BUNDLE_ID@</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>@APP_NAME@</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@VERSION@</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.music</string>
+	<!-- The bundled Node.js 24 needs 13.5; Open at Login needs 13. -->
+	<key>LSMinimumSystemVersion</key>
+	<string>13.5</string>
+	<!-- A menu bar app: no Dock icon and no menu bar of its own. -->
+	<key>LSUIElement</key>
+	<true/>
+	<!-- Shown in the prompt the first time Music or TV is read. -->
+	<key>NSAppleEventsUsageDescription</key>
+	<string>yanpresence reads what Music and TV are playing, so it can show it on your Discord profile.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Ethan Xu. MIT License.</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+</dict>
+</plist>

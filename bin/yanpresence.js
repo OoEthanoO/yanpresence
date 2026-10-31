@@ -45,8 +45,9 @@ Usage:
 
 Options:
   --tray                      Show a notification-area icon with Quit and an
-                              artist photo switch. Windows only; what the Start
-                              menu shortcut passes
+                              artist photo switch. What the Windows Start menu
+                              shortcut passes; on macOS, what yanpresence.app
+                              passes to put this behind its menu bar icon
   --log-file [path]           Also write the log to a file. Defaults to
                               ${LOG_FILE}
   --verbose                   Shorthand for --log-level debug
@@ -1046,6 +1047,13 @@ async function cmdSmtc(config) {
  * would be worse than the silence it replaces.
  */
 async function showFatalDialog(message, logFile) {
+  if (process.platform === 'darwin') {
+    // yanpresence.app shows it, as its own dialog, with a button to the log.
+    const { tellMenuBar } = await import('../src/tray.js');
+    const body = [message, logFile ? `\n\nThe full log is at:\n${logFile}` : ''].join('');
+    tellMenuBar({ type: 'fatal', message: body, logFile: logFile ?? '' });
+    return;
+  }
   if (process.platform !== 'win32') return;
   try {
     const { POWERSHELL } = await import('../src/win.js');
@@ -1199,9 +1207,15 @@ async function main() {
                 // only when that is set.
                 `No config was found. Expected one at:\n${path.join(SUPPORT_DIR, 'config.json')}`,
             '',
-            'To create one, open a terminal in the yanpresence folder and run:\n' +
-              'node bin/yanpresence.js --init\n\n' +
-              'then check it with:\nnode bin/yanpresence.js --doctor',
+            process.platform === 'darwin'
+              ? // The app's node is inside its bundle and on nobody's PATH, so
+                // there is no command worth suggesting. The config is optional,
+                // which makes removing it the one fix that always works.
+                'Fix that setting in the config file, or remove the file to go back to the ' +
+                'defaults. Then open yanpresence again.'
+              : 'To create one, open a terminal in the yanpresence folder and run:\n' +
+                'node bin/yanpresence.js --init\n\n' +
+                'then check it with:\nnode bin/yanpresence.js --doctor',
           ].join('\n\n'),
           logFile
         );
@@ -1230,11 +1244,20 @@ async function main() {
   };
 
   if (wantsTray) {
-    if (process.platform !== 'win32') {
-      log.warn('--tray is a Windows notification-area icon and does nothing here; ignoring it.');
+    const { Tray, menuBarChannel } = await import('../src/tray.js');
+    // On macOS the icon is yanpresence.app, which started this process and
+    // left a socket on a descriptor for it. Without one there is no icon to
+    // attach to: a source checkout has no menu bar app to start.
+    const channel = process.platform === 'darwin' ? menuBarChannel() : null;
+    if (process.platform !== 'win32' && channel === null) {
+      log.warn(
+        process.platform === 'darwin'
+          ? '--tray on macOS is the menu bar icon of yanpresence.app, which starts this process itself; ignoring it.'
+          : '--tray is a Windows notification-area icon and does nothing here; ignoring it.'
+      );
     } else {
-      const { Tray } = await import('../src/tray.js');
       tray = new Tray({
+        channel,
         onQuit: () => shutdown('Quit from the tray'),
         onArtistPhoto: (on) => {
           log.info(`Artist photo ${on ? 'on' : 'off'}, from the tray`);
@@ -1265,7 +1288,14 @@ async function main() {
   });
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   log.error(err?.stack ?? String(err));
+  // A failure this early -- a config file that does not parse, say -- comes
+  // before anything could put it in a dialog. yanpresence.app shows it, since
+  // nobody is watching a console; a terminal run has just printed it.
+  if (process.platform === 'darwin') {
+    const { tellMenuBar } = await import('../src/tray.js');
+    tellMenuBar({ type: 'fatal', message: err?.message ?? String(err), logFile: '' });
+  }
   process.exit(1);
 });
