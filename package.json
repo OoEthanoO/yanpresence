@@ -19,7 +19,10 @@
     "uninstall-windows": "powershell -NoProfile -ExecutionPolicy Bypass -File windows/uninstall.ps1",
     "make-icon": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-icon.ps1",
     "build:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1 -BootstrapCompiler",
-    "test:windows-package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-windows-package.ps1"
+    "test:windows-package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-windows-package.ps1",
+    "make-icon:macos": "swift scripts/make-icon-macos.swift",
+    "build:macos": "bash scripts/build-macos.sh",
+    "test:macos-package": "bash scripts/test-macos-package.sh"
   },
   "engines": {
     "node": ">=18"

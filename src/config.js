@@ -8,9 +8,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export const PROJECT_ROOT = path.resolve(__dirname, '..');
 
+// The Windows installer puts its runtime beside the app. yanpresence.app keeps
+// executables where a bundle's code belongs, in Contents/MacOS, two levels up
+// from the app itself in Contents/Resources/app. A source checkout has
+// neither, and finds the tool on PATH.
 function bundledTool(name) {
-  const bundled = path.join(PROJECT_ROOT, 'runtime', 'ffmpeg', 'bin', `${name}.exe`);
-  return process.platform === 'win32' && fs.existsSync(bundled) ? bundled : name;
+  const inAppBundle = PROJECT_ROOT.endsWith(path.join('.app', 'Contents', 'Resources', 'app'));
+  const bundled =
+    process.platform === 'win32'
+      ? path.join(PROJECT_ROOT, 'runtime', 'ffmpeg', 'bin', `${name}.exe`)
+      : process.platform === 'darwin' && inAppBundle
+        ? path.join(PROJECT_ROOT, '..', '..', 'MacOS', name)
+        : null;
+  return bundled && fs.existsSync(bundled) ? bundled : name;
 }
 
 // Three platforms, three opinions about where an application's files live.
@@ -43,8 +53,15 @@ function cacheDir() {
 export const SUPPORT_DIR = supportDir();
 export const CACHE_DIR = cacheDir();
 
-/** Where a hidden, Start-menu-launched run writes what it would have printed. */
-export const LOG_FILE = path.join(CACHE_DIR, 'yanpresence.log');
+/**
+ * Where a hidden run -- from the Start menu, or yanpresence.app -- writes what
+ * it would have printed. On macOS that is ~/Library/Logs, where Console looks
+ * and where the source install's launchd agent already writes.
+ */
+export const LOG_FILE =
+  process.platform === 'darwin'
+    ? path.join(os.homedir(), 'Library', 'Logs', 'yanpresence', 'yanpresence.log')
+    : path.join(CACHE_DIR, 'yanpresence.log');
 
 export const DEFAULTS = {
   // Public shared Discord application. Users may override this with an ID

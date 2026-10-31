@@ -59,8 +59,8 @@ And expanded, when someone clicks into your profile:
   (see [Animated artwork](#animated-artwork)).
 - **The artist's photo** in the small circle on the cover's corner, where
   Apple Music has one. It comes with the catalog match and is served straight
-  from Apple's CDN. Switch it off from the tray menu on Windows, or with
-  `artistPhoto: false`.
+  from Apple's CDN. Switch it off from the menu bar on macOS or the tray menu
+  on Windows, or with `artistPhoto: false`.
 - **Four clickable links.** Song → `details_url`, artist → `state_url`,
   album → the artwork's `large_url`, and the artist again from the photo's
   `small_url`. All point at `music.apple.com`.
@@ -93,6 +93,39 @@ and `yanpresence-windows-x64-setup.exe`, the version-less name the download link
 above and the website point at. You can also build it yourself; see
 [Build the Windows installer](#build-the-windows-installer) below.
 
+## Install on macOS
+
+Download the disk image for your Mac —
+[**Apple silicon**](https://github.com/OoEthanoO/yanpresence/releases/latest/download/yanpresence-macos-arm64.dmg)
+or [**Intel**](https://github.com/OoEthanoO/yanpresence/releases/latest/download/yanpresence-macos-x64.dmg)
+(also on [the website](https://presence.ethanyanxu.com/#get)) — open it, and drag
+**yanpresence** into **Applications**. It includes Node.js, ffmpeg and ffprobe,
+needs macOS 13.5 or later, and needs no administrator access.
+
+It is not notarized by Apple yet, so the first time you open it macOS says
+**"yanpresence" Not Opened**. Choose **Done** — not **Move to Trash**, which is
+the highlighted button — then open **System Settings → Privacy & Security**,
+scroll down to **Security**, click **Open Anyway** beside the line saying
+yanpresence was blocked, and confirm. That is once per version you download.
+
+The first time Music or TV plays, macOS asks whether **yanpresence** may
+control it. Choose **Allow**: that is how it reads what is playing.
+
+yanpresence lives in the menu bar and has no Dock icon; click its notes to
+switch the artist photo, open the log, or quit. It opens at login by default —
+untick **Open at Login** in its menu to stop that. As on Windows, you do not
+need a terminal, a Discord application, a cloud account, storage credentials,
+or a config file. See [The macOS app](#the-macos-app) for how it works.
+
+Coming from the source install? Remove its login agent first with
+`npm run uninstall-agent`: two copies would fight over one presence. Your
+config, caches and remembered settings carry over as they are.
+
+The disk images are on GitHub releases next to the Windows installer, as
+`yanpresence-<version>-macos-arm64.dmg` and `yanpresence-<version>-macos-x64.dmg`
+and under the version-less names linked above. To build one yourself, see
+[Build the macOS app](#build-the-macos-app).
+
 ### Shared services are ready to use
 
 Fresh installs use the existing **Apple Music** and **Apple TV** Discord
@@ -113,7 +146,8 @@ uploads, set `animatedArtwork.enabled` and `uploadLocalArtwork` to `false`.
 ## Requirements
 
 - One of:
-  - **macOS** with the Music app (and TV.app for Apple TV)
+  - **macOS** with the Music app (and TV.app for Apple TV); 13.5 or later for
+    the app (tested on macOS 27.2, Apple silicon)
   - **Windows 10/11** with the Apple Music app (and the Apple TV app), both
     from the Microsoft Store (tested on Windows 11 26200, Apple Music 1.1540)
   - **Linux** with a browser for Apple Music (tested on Ubuntu 26.04,
@@ -136,7 +170,7 @@ play in Chrome — see below for why.
 
 ## Run from source
 
-macOS and Linux use the source install. Windows developers can use it too.
+Linux uses the source install. macOS and Windows developers can use it too.
 Install Node.js and ffmpeg for your platform, then:
 
 ```bash
@@ -205,7 +239,8 @@ npm run install-windows
 ```
 
 This developer shortcut keeps using the checkout and your installed Node.js.
-For a self-contained installation, use the Windows installer above.
+For a self-contained installation, use the Windows installer above — or, on a
+Mac, the app.
 
 To have it start at login:
 
@@ -240,6 +275,36 @@ Node.js, ffmpeg and ffprobe. Give that file to another Windows user; they only
 need Discord and the Apple apps installed. Build tools are needed on the
 packaging machine, not on recipients' computers.
 
+### Build the macOS app
+
+On a Mac with the Xcode command line tools (`xcode-select --install`), from a
+source checkout — no Node.js or ffmpeg needed:
+
+```bash
+npm run build:macos
+```
+
+Or `bash scripts/build-macos.sh`, which is all that runs. The build downloads
+pinned Node.js and FFmpeg builds, verifies their checksums, compiles the menu
+bar app from [`macos/yanpresence.swift`](macos/yanpresence.swift), and creates
+`dist/yanpresence-<version>-macos-arm64.dmg` (or `-x64` on an Intel Mac; pass
+`--arch x64` or `--arch arm64` to choose). It runs the bundled programs as a
+check, so building for Intel on Apple silicon needs Rosetta.
+
+```bash
+npm run test:macos-package
+```
+
+builds a separately named copy, **yanpresence Smoke Test**, under its own
+bundle identifier, and drives it through LaunchServices: installed to a path
+with spaces, its Node swapped for a probe, crashed, quit, hung, opened twice and
+upgraded in place. It never touches a real installation, its login item or its
+permissions.
+
+The icon is [`assets/yanpresence.icns`](assets/yanpresence.icns), drawn by
+`npm run make-icon:macos` from the same geometry as the Windows icon and the
+website's logo. Like the `.ico`, it is committed rather than redrawn per build.
+
 ### Publish a release
 
 Bump `version` in `package.json`, commit, and push a matching tag:
@@ -249,12 +314,14 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-The **Windows installer** workflow builds and tests the installer, then attaches
-it to a **draft** release, once under its versioned name and once as
-`yanpresence-windows-x64-setup.exe`. Review the draft and publish it. The
-website's download buttons use `releases/latest/download/…`, which GitHub
-resolves only to published releases. Until you publish, the buttons keep
-serving the previous release, or return a 404 if none has ever been published.
+The **Windows installer** and **macOS app** workflows build and test their
+packages, then attach them to one **draft** release, each under its versioned
+name and once under a version-less one: `yanpresence-windows-x64-setup.exe`,
+`yanpresence-macos-arm64.dmg` and `yanpresence-macos-x64.dmg`. Review the draft
+and publish it. The website's download buttons use `releases/latest/download/…`,
+which GitHub resolves only to published releases. Until you publish, the buttons
+keep serving the previous release; a platform that release does not include is
+sent to the releases page instead.
 
 ## Advanced setup
 
@@ -604,12 +671,12 @@ macOS, `%LOCALAPPDATA%\yanpresence\cache` on Windows, and
 | `browser.mpris.enabled` | `true` | Read players off the session bus. Identifies Apple Music by itself in Firefox. |
 | `browser.mpris.players` | `{}` | Map an MPRIS bus name fragment to `music` / `tv` / `ignore`, for browsers that publish no page URL. |
 | `statusDisplay` | `"details"` | Which field lands on your status line: `details` (song), `state` (artist, Spotify's choice), `name`. |
-| `windows.tray` | `false` | Windows: show a notification-area icon with Quit and the artist photo switch. The Start menu shortcut passes `--tray` itself. See [Windows](#windows). |
+| `windows.tray` | `false` | Windows: show a notification-area icon with Quit and the artist photo switch. The Start menu shortcut passes `--tray` itself. See [Windows](#windows). The macOS app always has its menu bar icon. |
 | `windows.appIds.music` | `"AppleInc.AppleMusicWin"` | Windows: AUMID prefix of the app whose media session is Apple Music. |
 | `windows.appIds.tv` | `"AppleInc.AppleTVWin"` | Windows: the same, for Apple TV — which has never answered, since that app publishes no session. Kept so a future version that does is noticed. |
 | `windows.tvUiAutomation` | `true` | Windows: read the Apple TV app through UI Automation, the only way it can be read. See [Apple TV on Windows](#apple-tv-on-windows). |
 | `artworkSize` | `1024` | Square px requested from Apple's CDN. |
-| `artistPhoto` | `true` | The artist's photo in the small corner badge. No photo, no badge. On Windows the tray menu switches it and remembers the choice in `preferences.json` beside `config.json`, which wins over this value. The old `showSmallImage` and `smallImageKey` are ignored, except that `showSmallImage: false` still means no badge. |
+| `artistPhoto` | `true` | The artist's photo in the small corner badge. No photo, no badge. The menu bar icon on macOS and the tray menu on Windows switch it, and remember the choice in `preferences.json` beside `config.json`, which wins over this value. The old `showSmallImage` and `smallImageKey` are ignored, except that `showSmallImage: false` still means no badge. |
 | `placeholderImageKey` | `"blank"` | Portal asset shown when there's no album art. Shared applications include it; upload `assets/blank.png` only for your own application. `null` leaves the slot empty. |
 | `linkButtons` | `false` | Also attach classic Rich Presence buttons — a fallback for older clients that don't render `details_url`/`state_url`/`large_url`. |
 | `showWhenPaused` | `false` | Keep the presence up while paused. Off by default — a paused track isn't something you're listening to. When on, the progress bar is dropped. |
@@ -650,6 +717,9 @@ node bin/yanpresence.js --verbose    # debug logging
 node bin/yanpresence.js --smtc       # Windows: dump the raw media sessions
 node bin/yanpresence.js --tray       # Windows: run with a notification-area icon
 ```
+
+On macOS, `--tray` is what yanpresence.app passes to put Node behind its menu
+bar icon; run from a terminal, it has no icon to attach to and is ignored.
 
 `--dry-run` needs no `clientId` and is the fastest way to see exactly what
 Discord would be told.
@@ -732,6 +802,127 @@ each cached for 30 days. A film costs one search and one metadata call.
 iTunes Store. A purchased or rented film returns no match and keeps the
 `placeholderImageKey` fallback. Matching requires a title hit, so a near-miss
 yields no artwork rather than the wrong artwork.
+
+## The macOS app
+
+The app is the source install made self-contained: the same Node app, with its
+own Node.js, ffmpeg and ffprobe, behind a menu bar icon.
+
+```
+yanpresence.app/Contents/
+  MacOS/yanpresence        the menu bar icon: a small native app, parent of the rest
+  MacOS/node               Node.js, unmodified, still signed by the Node.js Foundation
+  MacOS/ffmpeg, ffprobe    FFmpeg, unmodified, still signed by its builder
+  Resources/app/           bin/, src/ and scripts/, as in this repository
+```
+
+On Windows the Node process is the app, and the tray icon is a PowerShell
+child it starts. Here the two swap places: the menu bar icon is what macOS
+starts, and Node runs as its child. That is not a matter of taste.
+
+- **Permission belongs to the app macOS launched.** Music.app is read over
+  Apple Events, by `osascript` watchers that Node starts. macOS attributes them
+  to the process it holds *responsible*, which is the one LaunchServices
+  started — so the prompt asks whether **yanpresence** may control Music, with
+  the app's name and icon, and the answer is kept for the app. With Node on
+  top it would ask on behalf of `node`, and a yes would extend to every copy of
+  Node signed the same way.
+- **LaunchServices knows the app is running only while its own process is.**
+  That is what makes opening it a second time reach the running copy, Open at
+  Login work, and logging out ask it to quit.
+- **A run loop is not something Node can host**, any more than it can host the
+  WinForms message loop on Windows.
+
+The two talk over a socket the app hands Node as a fourth file descriptor.
+What the menu says is the set of lines the Windows tray prints — `quit`,
+`artist-photo on` and `artist-photo off` — so [`src/tray.js`](src/tray.js)
+reads both the same way. What Node says back is JSON: what the card shows, and
+why it could not start, if it could not.
+
+### The menu bar icon
+
+```
+  ┌───────────────────────────────┐
+  │ yanpresence                   │  ← greyed-out header
+  │ Listening to Be Her — Ella …  │  ← what the card currently says
+  │ Allow Control of Music…       │  ← only after you refused the prompt
+  │ ───────────────────────────── │
+  │ ✓ Show Artist Photo           │  ← the badge on the cover's corner
+  │ ✓ Open at Login               │
+  │ ───────────────────────────── │
+  │ Open Log                      │
+  │ About yanpresence             │
+  │ ───────────────────────────── │
+  │ Quit yanpresence           ⌘Q │
+  └───────────────────────────────┘
+```
+
+**Show Artist Photo** works as on Windows, remembering the choice in
+`~/Library/Application Support/yanpresence/preferences.json`. **Quit** — and
+logging out, or anything else that asks the app to quit — clears the presence
+with Discord before Node exits. A Node that has not exited 8 seconds later is
+stopped, along with anything it started, so quitting never leaves an encode or
+a watcher behind.
+
+**Allow Control of Music…** appears only once the permission prompt has been
+refused, because a refusal is otherwise invisible: the card simply never
+appears. It opens **System Settings → Privacy & Security → Automation**, where
+yanpresence has a switch for Music and one for TV.
+
+If you cannot see the icon — behind the notch on a crowded menu bar, or hidden
+under **System Settings → Menu Bar** — open yanpresence again from Applications
+or Spotlight. The running copy puts its icon back and drops its menu open.
+
+Node crashing does not take the app with it: it is restarted, as the source
+install's launchd agent restarts it, unless it fails at start-up or keeps
+failing. Then a dialog says why, with a button to the log.
+
+### Open at Login
+
+On by default, as the Windows installer's startup box is. It is switched on
+the first time the app runs from Applications and never again, so unticking it
+sticks. A copy run from anywhere else — a build folder, the disk image — is
+left alone, since a login item would point at something about to move. The
+same switch is under **System Settings → General → Login Items**.
+
+### Installing, upgrading and removing
+
+Opened straight off the disk image, the app first offers to move itself to
+Applications, since it would otherwise vanish when the disk image is ejected.
+
+To upgrade, drag the new version into Applications over the old one and open
+it. Only one copy ever runs, and the one opened last wins: a running copy that
+finds a newer version on disk hands over to it, and a second copy started from
+anywhere else asks the first to quit. Either way the old one clears its
+presence on the way out, as the Windows installer stops the running app before
+it upgrades.
+
+To remove it, untick **Open at Login**, quit it, and drag yanpresence from
+Applications to the Trash. Your config, caches and log are kept.
+
+### Not notarized, and what that costs
+
+The app is signed ad hoc rather than with an Apple Developer ID, so Gatekeeper
+asks once before the first launch of each version you download — the **Open
+Anyway** step under [Install on macOS](#install-on-macos). Node.js, ffmpeg and
+ffprobe keep their publishers' signatures and are notarized; only the small
+menu bar program is not.
+
+For the same reason, macOS ties the Automation permission to the exact build.
+After an update it may ask again whether yanpresence can control Music.
+
+### Where things go
+
+| | |
+|---|---|
+| Installed app | `/Applications/yanpresence.app` (or `~/Applications`) |
+| Config | `~/Library/Application Support/yanpresence/config.json` (optional) |
+| Menu choices | `~/Library/Application Support/yanpresence/preferences.json` (written by the app) |
+| Caches | `~/Library/Application Support/yanpresence/cache/` |
+| Log | `~/Library/Logs/yanpresence/yanpresence.log` — **Open Log** shows it in Console |
+
+The log is opened before the config is validated, as on Windows, and a
+start-up failure raises a dialog rather than leaving nothing to see.
 
 ## Windows
 
@@ -1035,7 +1226,8 @@ image slot), artwork cache invalidation, the watcher's watchdog, the Windows
 media session's normalizers — including unpicking the album from the artist
 field the Apple Music app packs them both into — the Apple TV reader's parsing
 and its carry-forward when the player's controls are off screen, the tray
-icon's protocol, and the Linux path end to end: MPRIS
+icon's protocol — on Windows, and over the socket to the macOS app — and the
+Linux path end to end: MPRIS
 parsing and classification against real captured `busctl` replies, the bridge's
 HTTP contract, the extension's own scripts run against stubbed browser APIs,
 and GPU encoder selection on both the VAAPI and AMF paths, including the
@@ -1048,7 +1240,9 @@ a program the source shells out to (`busctl`, `ffmpeg`) by writing a
 `#!/usr/bin/env node` file and setting the execute bit; Windows has neither,
 and a `.cmd` shim cannot be spawned without `shell: true`, which the code under
 test rightly does not pass. Both programs are Linux-only concerns, so the
-coverage lost is coverage of code that cannot run there anyway.
+coverage lost is coverage of code that cannot run there anyway. Elsewhere they
+need `node` on `PATH` for that shebang, which a Mac running only the app does
+not have.
 
 ## How it works
 
@@ -1115,6 +1309,10 @@ A few decisions worth calling out:
   own UI, which only exists while its controls are on screen. Both end up
   producing the snapshots macOS produces, which is the only reason two
   mechanisms this unalike can sit behind one source.
+- **On macOS the menu bar app is Node's parent, not its child** — the reverse
+  of the Windows tray icon. macOS asks for Automation permission on behalf of
+  the app it launched, so that has to be yanpresence.app, not `node`; see
+  [The macOS app](#the-macos-app).
 - **GPU work is verified, not assumed** — and then measured, which is how VAAPI
   turned out to produce files Discord cannot render at all while AMF, on the
   same silicon, produces files it renders fine. Both facts came from checking,
@@ -1129,6 +1327,18 @@ some views — check your profile popout, or ask someone else. Also confirm
 **`--doctor` says no response from the watcher.** macOS is blocking automation.
 *System Settings → Privacy & Security → Automation* → allow your terminal (or
 `node`) to control Music.
+
+**macOS: "yanpresence" Not Opened.** The app is not notarized. Choose **Done**,
+then *System Settings → Privacy & Security* → **Open Anyway**; see
+[Install on macOS](#install-on-macos).
+
+**macOS: the app runs, but nothing reaches Discord and its menu says Allow
+Control of Music….** The permission prompt was refused. Choose that item, and
+switch on Music (and TV) under yanpresence.
+
+**macOS: I cannot find the menu bar icon.** Open yanpresence again from
+Applications or Spotlight: the running copy puts its icon back and drops its
+menu open. On a crowded menu bar, icons past the notch are not drawn at all.
 
 **Windows: `--doctor` says Apple Music is not running when it is.** The app
 registers its media session when it launches, so this means the session is not

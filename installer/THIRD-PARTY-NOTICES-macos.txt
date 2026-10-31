@@ -1,0 +1,21 @@
+yanpresence macOS runtime components
+
+Node.js
+Copyright Node.js contributors. Node.js is distributed under the MIT license
+and includes third-party components. The full notices are included in
+runtime/NODE-LICENSE.txt.
+Source: https://github.com/nodejs/node/tree/v24.21.0
+Binary and checksums: https://nodejs.org/dist/v24.21.0/
+
+FFmpeg / ffprobe
+These separate command-line programs are built by Martin Riedl and distributed
+under GPLv3. The full license is in runtime/ffmpeg/LICENSE.txt, and the upstream
+build configuration and library versions are in runtime/ffmpeg/BUILD.txt.
+Builds: https://ffmpeg.martin-riedl.de/
+Build scripts: https://git.martin-riedl.de/ffmpeg/build-script
+FFmpeg source: https://github.com/FFmpeg/FFmpeg/tree/n9.0.2
+
+The app contains unmodified Node.js and FFmpeg executables, in
+yanpresence.app/Contents/MacOS, still carrying their publishers' own code
+signatures. Dependency versions, download URLs and SHA-256 hashes are in
+runtime/dependencies.json.
