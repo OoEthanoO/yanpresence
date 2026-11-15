@@ -76,16 +76,22 @@ static NSDictionary *snapshot(GetPidFn getPid, GetInfoFn getInfo) {
   }
 
   double rate = number(info[@"kMRMediaRemoteNowPlayingInfoPlaybackRate"]);
+  // TV.app leaves PlaybackRate at 1 when it pauses and only clears this flag, so the flag decides when it is
+  // there; the rate is the fallback for an app that sets no flag.
+  id flag = info[@"kMRMediaRemoteNowPlayingApplicationIsPlayingUserInfoKey"];
+  BOOL playing = [flag respondsToSelector:@selector(boolValue)] ? [flag boolValue] : rate > 0;
   double elapsed = number(info[@"kMRMediaRemoteNowPlayingInfoElapsedTime"]);
   id stamp = info[@"kMRMediaRemoteNowPlayingInfoTimestamp"];
-  // ElapsedTime is as of Timestamp; while playing, the clock has moved on since.
-  if (rate > 0 && [stamp isKindOfClass:[NSDate class]]) elapsed += -[(NSDate *)stamp timeIntervalSinceNow] * rate;
+  // ElapsedTime is as of Timestamp; while playing, the clock has moved on since. Paused, it has not.
+  if (playing && rate > 0 && [stamp isKindOfClass:[NSDate class]]) {
+    elapsed += -[(NSDate *)stamp timeIntervalSinceNow] * rate;
+  }
 
   NSString *title = string(info[@"kMRMediaRemoteNowPlayingInfoTitle"]);
   if (!title.length) return @{@"state": @"none", @"bundle": bundle};
 
   return @{
-    @"state": rate > 0 ? @"playing" : @"paused",
+    @"state": playing ? @"playing" : @"paused",
     @"bundle": bundle,
     @"title": title,
     @"album": string(info[@"kMRMediaRemoteNowPlayingInfoAlbum"]),
