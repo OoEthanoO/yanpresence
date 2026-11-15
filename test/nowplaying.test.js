@@ -103,7 +103,7 @@ test('without a helper the combined watcher runs on Apple Events alone', async (
   tv.stop();
 });
 
-test('inside the app bundle the helper is in Contents/Frameworks', () => {
+test('inside the app bundle the helper is in Contents/Frameworks', { skip: process.platform !== 'darwin' }, () => {
   const root = path.join('/Applications', 'yanpresence.app', 'Contents', 'Resources', 'app');
   assert.equal(helperPath(root), path.join('/Applications', 'yanpresence.app', 'Contents', 'Frameworks', HELPER_NAME));
   assert.equal(helperPath('/src/yanpresence'), path.join('/src/yanpresence', '.build', 'nowplaying', HELPER_NAME));
