@@ -125,6 +125,14 @@ echo "Compiling the menu bar app for $triple"
 xcrun swiftc -O -swift-version 5 -target "$triple" \
   -o "$contents/MacOS/yanpresence" "$repo/macos/yanpresence.swift"
 
+# TV.app reports nothing over Apple Events while it streams, so src/nowplaying.js reads the system Now
+# Playing record through this library, loaded into /usr/bin/perl. Both architectures: the perl that loads it
+# runs as whichever one the app's Node runs as.
+echo "Compiling the Now Playing helper"
+mkdir -p "$contents/Frameworks"
+xcrun clang -dynamiclib -fobjc-arc -O2 -mmacosx-version-min=13.5 -arch arm64 -arch x86_64 -framework AppKit \
+  -o "$contents/Frameworks/yanpresence-nowplaying.dylib" "$repo/macos/nowplaying.m"
+
 # An allowlist keeps config.json, .env files, credentials, worker deployments,
 # tests, and build caches out of the app even in a developer checkout. -X:
 # without extended attributes, which codesign refuses to seal.
@@ -190,6 +198,8 @@ fi
 # and Gatekeeper asks once before it first opens (see the README). Signing
 # still seals the bundle, and Apple silicon runs nothing unsigned.
 xattr -cr "$app"
+# Nested code is signed before the bundle that seals it.
+codesign --force --sign - "$contents/Frameworks/yanpresence-nowplaying.dylib"
 codesign --force --sign - "$app"
 codesign --verify --strict --deep "$app"
 echo "Signed $app"

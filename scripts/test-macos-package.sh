@@ -88,7 +88,8 @@ codesign --verify --strict --deep "$mount/$name.app" || fail "the app on the dis
 ditto "$mount/$name.app" "$app"
 hdiutil detach -quiet "$mount"
 [ ! -e "$app/Contents/Resources/app/config.json" ] || fail "the app includes a private config.json"
-for file in MacOS/yanpresence MacOS/node MacOS/ffmpeg MacOS/ffprobe Resources/yanpresence.icns \
+for file in MacOS/yanpresence MacOS/node MacOS/ffmpeg MacOS/ffprobe Frameworks/yanpresence-nowplaying.dylib \
+  Resources/yanpresence.icns \
   Resources/app/bin/yanpresence.js Resources/app/scripts/music-watch.js Resources/app/scripts/tv-watch.js \
   Resources/app/runtime/ffmpeg/LICENSE.txt Resources/app/THIRD-PARTY-NOTICES.txt; do
   [ -e "$app/Contents/$file" ] || fail "missing from the app: $file"

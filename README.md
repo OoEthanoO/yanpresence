@@ -731,9 +731,18 @@ Available on macOS and Windows, and not through a browser — see
 
 On macOS, TV.app descends from the same iTunes scripting dictionary as Music.app
 — it answers `player state`, `player position` and `current track` the same way
-— so watching it costs one more resident `osascript` and nothing else. On
-Windows it is read from the Apple TV player's UI Automation tree. It is enabled
-by default. To turn it off, set `tv.enabled` to `false`.
+— but only for files it plays from disk. While it **streams** (every Apple TV+
+title, and rentals and purchases played from the cloud) it answers "stopped",
+with no current track. For those, yanpresence reads macOS's system **Now
+Playing** record instead — the one behind the media controls in Control Center —
+which has the episode, the show, the length and the position. Since macOS 15.4
+only Apple-signed processes may read it, so a small helper library,
+`macos/nowplaying.m` (in the app at `Contents/Frameworks`, compiled on first use
+in a source checkout), is loaded into the system's own `/usr/bin/perl`. Apple
+Events still come first when they see something, since a downloaded episode
+carries its season and episode numbers there. On Windows, TV is read from the
+Apple TV player's UI Automation tree. It is enabled by default. To turn it off,
+set `tv.enabled` to `false`.
 
 What lands on Discord, for an episode:
 
@@ -1252,6 +1261,9 @@ Music.app ──Apple Events──> scripts/music-watch.js  (resident osascript,
                                      │ JSON lines
                                      ▼
                               src/music.js     ────┐  normalize, watchdog, respawn
+TV.app ─────Apple Events──> scripts/tv-watch.js     │  (downloads)
+       └──system Now Playing──> macos/nowplaying.m in /usr/bin/perl  (streams)
+                              src/tv.js, src/nowplaying.js ──┤  merge: Apple Events first
                                                    │
 Windows:                                           │
 Apple Music ──media session──> scripts/smtc-watch.ps1   (resident PowerShell, WinRT)

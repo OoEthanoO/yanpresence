@@ -1,20 +1,81 @@
+import { EventEmitter } from 'node:events';
 import path from 'node:path';
 
 import { PROJECT_ROOT } from './config.js';
+import log from './log.js';
+import { ensureHelper, NowPlayingTvWatcher } from './nowplaying.js';
 import { AppWatcher, str } from './watcher.js';
 
 const WATCHER = path.join(PROJECT_ROOT, 'scripts', 'tv-watch.js');
 
 /**
- * Watches TV.app and emits `state` with a normalized snapshot.
+ * Watches TV.app over Apple Events and emits `state` with a normalized snapshot.
  *
  * Shares its process supervision with the Music watcher; only the script and
  * the snapshot shape are different.
  */
-export class TvWatcher extends AppWatcher {
+export class AppleEventsTvWatcher extends AppWatcher {
   constructor({ pollIntervalMs, idlePollIntervalMs } = {}) {
     super({ script: WATCHER, label: 'TV', normalize, pollIntervalMs, idlePollIntervalMs });
   }
+}
+
+/**
+ * TV.app from two sources, emitting one `state`.
+ *
+ * Apple Events come first: for a downloaded episode they carry the season and
+ * episode numbers. But TV.app reports "stopped" with no current track while it
+ * streams -- every Apple TV+ title, rental and cloud purchase -- so then the
+ * system Now Playing record (nowplaying.js) stands in. Either source alone is
+ * enough to run; the second is skipped where its helper cannot be built.
+ */
+export class TvWatcher extends EventEmitter {
+  constructor(timing = {}, { appleEvents, nowPlaying, helper = ensureHelper } = {}) {
+    super();
+    this.timing = timing;
+    this.appleEvents = appleEvents ?? new AppleEventsTvWatcher(timing);
+    this.nowPlaying = nowPlaying ?? null;
+    this.findHelper = helper;
+    this.latest = { appleEvents: null, nowPlaying: null };
+    this.stopped = false;
+    this.appleEvents.on('state', (s) => this.take('appleEvents', s));
+    if (this.nowPlaying) this.nowPlaying.on('state', (s) => this.take('nowPlaying', s));
+  }
+
+  start() {
+    this.stopped = false;
+    this.appleEvents.start();
+    if (this.nowPlaying) {
+      this.nowPlaying.start();
+      return;
+    }
+    Promise.resolve(this.findHelper())
+      .then((helper) => {
+        if (!helper || this.stopped || this.nowPlaying) return;
+        this.nowPlaying = new NowPlayingTvWatcher({ helper, ...this.timing });
+        this.nowPlaying.on('state', (s) => this.take('nowPlaying', s));
+        this.nowPlaying.start();
+      })
+      .catch((err) => log.debug(`Now Playing helper unavailable: ${err.message}`));
+  }
+
+  stop() {
+    this.stopped = true;
+    this.appleEvents.stop();
+    this.nowPlaying?.stop();
+  }
+
+  take(source, snapshot) {
+    this.latest[source] = snapshot;
+    this.emit('state', mergeTvSnapshots(this.latest.appleEvents, this.latest.nowPlaying));
+  }
+}
+
+/** The snapshot to act on: Apple Events when they see something, else Now Playing, else Apple Events' idle state. */
+export function mergeTvSnapshots(appleEvents, nowPlaying) {
+  if (appleEvents?.active) return appleEvents;
+  if (nowPlaying?.active) return nowPlaying;
+  return appleEvents ?? nowPlaying ?? { state: 'unknown', active: false, item: null, receivedAt: Date.now() };
 }
 
 function normalize(raw) {
