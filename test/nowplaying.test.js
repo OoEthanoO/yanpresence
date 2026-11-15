@@ -136,3 +136,56 @@ test('the helper builds, loads into /usr/bin/perl, and reports', { skip: process
   assert.ok(Date.now() - started < 6000);
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+/* ---- season and episode numbers for a stream, from the catalog ---------------------------------------- */
+
+import { TvCatalog, titleKey } from '../src/tvcatalog.js';
+
+function catalogWithEpisodes(pages) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yp-cat-'));
+  const cat = new TvCatalog({ storefront: 'ca', cacheDir: dir, artworkSize: 1024 });
+  cat.tokens.get = async () => 'token';
+  const requested = [];
+  cat.getJson = async (url) => {
+    const season = new URL(url).searchParams.get('selectedSeasonId');
+    requested.push(season);
+    return { data: { episodes: pages[season] ?? [] } };
+  };
+  cat.memo.set('ca|12 12 12', { id: 'umc.cmc.show', seasonIds: { 1: 's1', 2: 's2' } });
+  return { cat, requested };
+}
+
+const S1 = [
+  { seasonNumber: 1, episodeNumber: 1, duration: 3721, title: 'I’m Robbing the House on Christmas Eve While the Family’s at Mass' },
+  { seasonNumber: 1, episodeNumber: 2, duration: 3500, title: 'I Want My Halo Back' },
+];
+const S2 = [{ seasonNumber: 2, episodeNumber: 1, duration: 3300, title: 'A Second Season Opener' }];
+
+test('titles match across curly and straight quotes, case and spacing', () => {
+  assert.equal(titleKey('I’m  Robbing'), titleKey("i'm robbing"));
+  assert.equal(titleKey(null), '');
+});
+
+test('a streamed episode gets its season and number from the catalog, by title', async () => {
+  const { cat, requested } = catalogWithEpisodes({ s1: S1, s2: S2 });
+  const item = normalizeNowPlaying({ ...STREAMING, title: "I'm Robbing the House on Christmas Eve While the Family's at Mass" }).item;
+  assert.deepEqual(await cat.episodeNumbersFor(item), { season: 1, episode: 1 });
+  assert.deepEqual(requested, ['s2', 's1'], 'newest season first, then the next');
+
+  // The walk is cached with the show: the next episode costs nothing.
+  assert.deepEqual(await cat.episodeNumbersFor({ ...item, name: 'I Want My Halo Back' }), { season: 1, episode: 2 });
+  assert.equal(requested.length, 2);
+});
+
+test('no numbers for a film, an episode that already has them, or a title the catalog lacks', async () => {
+  const { cat, requested } = catalogWithEpisodes({ s1: S1, s2: S2 });
+  const item = normalizeNowPlaying(STREAMING).item;
+  assert.equal(await cat.episodeNumbersFor({ ...item, isEpisode: false }), null);
+  assert.equal(await cat.episodeNumbersFor({ ...item, season: 3, episode: 4 }), null);
+  assert.equal(requested.length, 0);
+
+  assert.equal(await cat.episodeNumbersFor({ ...item, name: 'Not an Episode' }), null);
+  const after = requested.length;
+  assert.equal(await cat.episodeNumbersFor({ ...item, name: 'Not an Episode' }), null);
+  assert.equal(requested.length, after, 'a miss is remembered, not refetched every second');
+});

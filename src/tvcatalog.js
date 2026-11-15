@@ -423,7 +423,7 @@ export class TvCatalog {
    * progress bar. `selectedEpisodeId` moves the window, so this walks it,
    * anchoring each request on the last episode it has seen.
    */
-  async episodeDurations(showId, seasonId, token) {
+  async episodeDurations(showId, seasonId, token, titles = null) {
     const base =
       `${UTS_BASE}/shows/${encodeURIComponent(showId)}/episodes?utsk=${encodeURIComponent(token)}` +
       `&caller=web&sf=${this.sf}&v=80&pfm=web&locale=en-US&utscf=OjAAAAAAAAA~` +
@@ -453,6 +453,10 @@ export class TvCatalog {
         // episode id: an entry without an id still has a runtime worth having.
         const seconds = Number(episode?.duration);
         if (seconds > 0) out[`${s}|${e}`] = seconds;
+        // The same walk gives each episode's title, which is how a stream with
+        // no numbers of its own finds them (episodeNumbersFor).
+        const title = titleKey(episode?.title);
+        if (titles && title) titles[title] = `${s}|${e}`;
       }
 
       const total = Number(body?.data?.totalEpisodeCount) || 0;
@@ -523,6 +527,65 @@ export class TvCatalog {
     // Remembered for this process only: a show Apple publishes no runtime for
     // should not re-walk its season on every episode change, but a restart
     // gets to try again.
+    this.durationMisses.add(missKey);
+    return null;
+  }
+
+  /**
+   * `{ season, episode }` for an episode that arrived without numbers, found by
+   * its title in the show's episode list; or null.
+   *
+   * TV.app's Now Playing record (what nowplaying.js reads for every stream)
+   * names the episode and the show but numbers neither. The catalog lists
+   * every episode with both, so the title is matched there. Seasons are walked
+   * newest first, and one walk usually brings its neighbours along, so the
+   * whole show is rarely more than a request or two. Matches are cached with
+   * the show entry.
+   */
+  async episodeNumbersFor(item) {
+    if (!item?.isEpisode || item.season || item.episode) return null;
+    const term = item.show;
+    const want = titleKey(item.name);
+    if (!term || !want) return null;
+
+    const key = `${this.storefront}|${term.toLowerCase()}`;
+    const entry = this.memo.get(key) ?? this.disk[key];
+    if (!entry || entry.miss || !entry.id) return null;
+
+    entry.episodeTitles ??= {};
+    const known = () => {
+      const slot = entry.episodeTitles[want];
+      if (!slot) return null;
+      const [season, episode] = slot.split('|').map(Number);
+      return { season, episode };
+    };
+    if (known()) return known();
+
+    const missKey = `${key}|title|${want}`;
+    if (this.durationMisses.has(missKey)) return null;
+
+    const token = await this.tokens.get();
+    if (!token) return null;
+
+    const seasons = Object.keys(entry.seasonIds ?? {}).map(Number).sort((a, b) => b - a);
+    entry.durations ??= {};
+    for (const season of seasons) {
+      const walked = Object.values(entry.episodeTitles).some((slot) => slot.startsWith(`${season}|`));
+      if (walked) continue;
+      const found = await this.episodeDurations(entry.id, entry.seasonIds[season], token, entry.episodeTitles)
+        .catch((err) => {
+          log.debug(`Episode list lookup failed: ${err.message}`);
+          return null;
+        });
+      for (const [at, seconds] of Object.entries(found ?? {})) {
+        if (seconds > 0) entry.durations[at] = seconds;
+      }
+      if (known()) break;
+    }
+    this.disk[key] = entry;
+    this.saveDisk();
+
+    if (known()) return known();
     this.durationMisses.add(missKey);
     return null;
   }
@@ -617,4 +680,19 @@ export function tvArtworkAt(template, size) {
     // stop at the extension rather than at the first dot it meets.
     .replace(/\{w\}x\{h\}(?:\{c\}|[A-Za-z0-9.\-]*?)(?=\.\{f\})/, `${size}x${size}bf`)
     .replace('{f}', 'jpg');
+}
+
+/**
+ * A title reduced to what two spellings of it share: Unicode-normalized,
+ * lower case, curly quotes made straight, spacing collapsed.
+ */
+export function titleKey(title) {
+  if (typeof title !== 'string') return '';
+  return title
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[\u2018\u2019\u02bc]/g, "'")
+    .replace(/[\u201c\u201d]/g, '"')
+    .replace(/\s+/g, ' ')
+    .trim();
 }

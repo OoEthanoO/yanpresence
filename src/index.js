@@ -46,6 +46,7 @@ export class YanPresence {
     this.musicSnapshot = null;
     this.tvArtworkUrl = null;
     this.tvDuration = 0;
+    this.tvNumbers = null; // { season, episode } from the catalog, for a stream that came without
     this.source = null; // 'music' | 'tv' | null
 
     // Everything about the track Discord is currently being told about.
@@ -159,6 +160,7 @@ export class YanPresence {
       this.tvStartedAt = state === 'playing' ? receivedAt - item.position * 1000 : null;
       this.tvArtworkUrl = null;
       this.tvDuration = 0;
+      this.tvNumbers = null;
       this.cancelHide();
       this.render();
       this.enrichTv(item).catch((err) => log.debug(`TV enrichment failed: ${err.message}`));
@@ -197,6 +199,18 @@ export class YanPresence {
     const key = item.key;
     const result = await this.tvCatalog.lookup(item);
     if (this.tvKey !== key) return; // moved on while we were looking
+
+    // A stream read from Now Playing names the episode but not its season or
+    // number; the catalog's episode list has both, matched on the title.
+    if (item.isEpisode && !item.season && !item.episode) {
+      const numbers = await this.tvCatalog.episodeNumbersFor(item);
+      if (this.tvKey !== key) return;
+      if (numbers) {
+        this.tvNumbers = numbers;
+        log.info(`Found ${item.show} — ${item.name} as S${numbers.season}E${numbers.episode} in the catalog`);
+        this.render();
+      }
+    }
 
     // Deliberately no page-artwork fallback here, unlike music: this method
     // only runs under the apple-apps source -- WebSources.tv is null -- and
@@ -421,7 +435,11 @@ export class YanPresence {
       buildWatchActivity({
         // The runtime resolved from the catalog stands in when TV.app reports
         // none, which is every Apple TV+ stream.
-        item: { ...this.tvItem, duration: this.tvItem.duration || this.tvDuration || 0 },
+        item: {
+          ...this.tvItem,
+          ...(this.tvNumbers && !this.tvItem.season && !this.tvItem.episode ? this.tvNumbers : {}),
+          duration: this.tvItem.duration || this.tvDuration || 0,
+        },
         state: this.tvState,
         artworkUrl: this.tvArtworkUrl ?? null,
         config: this.config,
