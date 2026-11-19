@@ -77,6 +77,27 @@ test('the artist photo switch reports where it was left', () => {
 test('without a handler the switch is ignored, not fatal', () => {
   const tray = new Tray({ onQuit: () => {} });
   assert.doesNotThrow(() => tray.onData('artist-photo off\n'));
+  assert.doesNotThrow(() => tray.onData('tv-paused off\n'));
+  tray.stop();
+});
+
+test('the paused Apple TV switch reports where it was left, apart from the photo', () => {
+  const tv = [];
+  const photo = [];
+  const tray = new Tray({
+    onQuit: () => {},
+    onArtistPhoto: (on) => photo.push(on),
+    onTvPaused: (on) => tv.push(on),
+  });
+  assert.equal(tray.tvPaused, true, 'on unless told otherwise');
+
+  tray.onData('tv-paused off\nartist-photo off\ntv-paused on\ntv-paused off\n');
+  assert.deepEqual(tv, [false, true, false]);
+  assert.deepEqual(photo, [false], 'each line reaches only its own switch');
+  assert.equal(tray.tvPaused, false);
+
+  tray.onData('tv-paused\ntv-paused maybe\n');
+  assert.deepEqual(tv, [false, true, false], 'only the two exact lines count');
   tray.stop();
 });
 
@@ -159,19 +180,23 @@ function settle() {
   return new Promise((resolve) => setTimeout(resolve, 50));
 }
 
-test('the menu bar app is told where the switch stands and where the log is', async (t) => {
+test('the menu bar app is told where the switches stand and where the log is', async (t) => {
   const { node, heard } = await menuBarPair(t);
   const tray = new Tray({
     channel: node,
     onQuit: () => {},
     onArtistPhoto: () => {},
     artistPhoto: false,
+    onTvPaused: () => {},
+    tvPaused: false,
     logFile: '/tmp/yanpresence.log',
   });
   tray.start();
   await settle();
 
-  assert.deepEqual(heard, [{ type: 'hello', logFile: '/tmp/yanpresence.log', artistPhoto: false }]);
+  assert.deepEqual(heard, [
+    { type: 'hello', logFile: '/tmp/yanpresence.log', artistPhoto: false, tvPaused: false },
+  ]);
   tray.stop();
 });
 
@@ -182,6 +207,7 @@ test('without a handler the menu bar app is told to leave the switch out', async
   await settle();
 
   assert.equal(heard[0].artistPhoto, null);
+  assert.equal(heard[0].tvPaused, null);
   tray.stop();
 });
 

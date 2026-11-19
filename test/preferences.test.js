@@ -29,12 +29,19 @@ test('a choice from the tray is written, read back, and changed again', (t) => {
 
   savePreferences({ artistPhoto: true }, file);
   assert.deepEqual(loadPreferences(file), { artistPhoto: true });
+
+  // A second switch is kept beside the first, not over it.
+  savePreferences({ showTvWhenPaused: false }, file);
+  assert.deepEqual(loadPreferences(file), { artistPhoto: true, showTvWhenPaused: false });
 });
 
 test('only known preferences of the right type are read', (t) => {
   const file = path.join(tmp(t), 'preferences.json');
 
-  fs.writeFileSync(file, JSON.stringify({ artistPhoto: 'no', clientId: '1', hosting: { mode: 'command' } }));
+  fs.writeFileSync(
+    file,
+    JSON.stringify({ artistPhoto: 'no', showTvWhenPaused: 0, clientId: '1', hosting: { mode: 'command' } })
+  );
   assert.deepEqual(loadPreferences(file), {}, 'it cannot become a second config file');
 
   for (const garbage of ['{ not json', 'null', '[true]']) {

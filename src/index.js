@@ -127,6 +127,17 @@ export class YanPresence {
     this.render();
   }
 
+  /**
+   * Whether a paused show or film stays on the card, as the tray menu
+   * switches it. Applied to a pause already under way: switched off, the
+   * card comes down; switched on, it goes back up, marked "Paused".
+   */
+  setTvShowWhenPaused(on) {
+    if (this.config.showTvWhenPaused === on) return;
+    this.config.showTvWhenPaused = on;
+    this.render();
+  }
+
   /* ------------------------------------------------------------------ */
 
   /* ---- TV.app ------------------------------------------------------- */
@@ -425,7 +436,9 @@ export class YanPresence {
   renderTv() {
     if (!this.tvItem) return;
 
-    if (this.tvState === 'paused' && !this.config.showWhenPaused) {
+    // Music has its own switch: a paused episode is still what you are
+    // watching, where a paused track is not what you are listening to.
+    if (this.tvState === 'paused' && !this.config.showTvWhenPaused) {
       this.scheduleHide();
       return;
     }

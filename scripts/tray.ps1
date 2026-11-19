@@ -6,8 +6,9 @@
 # icon is not decoration, it is the quit button.
 #
 # Speaks two ways to the Node process that spawned it:
-#   out  a line on stdout -- "quit" when Quit is clicked, and "artist-photo on"
-#        or "artist-photo off" when the artist photo item is switched.
+#   out  a line on stdout -- "quit" when Quit is clicked, "artist-photo on" or
+#        "artist-photo off" when the artist photo item is switched, and
+#        "tv-paused on" or "tv-paused off" for the paused Apple TV item.
 #   in   a status file it polls, whose first line becomes the tooltip and
 #        whose second becomes the greyed-out line at the top of the menu.
 #
@@ -16,7 +17,7 @@
 # that is a great deal of machinery for "what song is playing".
 #
 # Usage: tray.ps1 -ParentPid <pid> -StatusFile <path> [-IconFile <path>]
-#                 [-LogFile <path>] [-ArtistPhoto on|off]
+#                 [-LogFile <path>] [-ArtistPhoto on|off] [-TvPaused on|off]
 
 param(
   [Parameter(Mandatory = $true)][int]$ParentPid,
@@ -24,7 +25,10 @@ param(
   [string]$IconFile = '',
   [string]$LogFile = '',
   # Where the artist photo switch starts. Left empty, the item is not shown.
-  [string]$ArtistPhoto = ''
+  [string]$ArtistPhoto = '',
+  # Where the paused Apple TV switch starts. Left empty -- TV is not being
+  # watched -- the item is not shown.
+  [string]$TvPaused = ''
 )
 
 Set-StrictMode -Off
@@ -83,6 +87,21 @@ if ($ArtistPhoto) {
       if ($photo.Checked) { Send-Line 'artist-photo on' } else { Send-Line 'artist-photo off' }
     })
   [void]$menu.Items.Add($photo)
+}
+
+if ($TvPaused) {
+  # Not $tvPaused: PowerShell names are case-insensitive, so that would be the
+  # parameter itself.
+  $tvItem = New-Object System.Windows.Forms.ToolStripMenuItem('Show Apple TV while paused')
+  $tvItem.Checked = ($TvPaused -eq 'on')
+  $tvItem.CheckOnClick = $true
+  $tvItem.Add_CheckedChanged({
+      if ($tvItem.Checked) { Send-Line 'tv-paused on' } else { Send-Line 'tv-paused off' }
+    })
+  [void]$menu.Items.Add($tvItem)
+}
+
+if ($ArtistPhoto -or $TvPaused) {
   [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 }
 

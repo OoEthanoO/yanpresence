@@ -1269,6 +1269,19 @@ async function main() {
           }
         },
         artistPhoto: config.artistPhoto,
+        // Only where TV is watched at all; elsewhere the switch would do nothing.
+        onTvPaused: app.tvEnabled
+          ? (on) => {
+              log.info(`Paused Apple TV ${on ? 'shown' : 'hidden'}, from the tray`);
+              app.setTvShowWhenPaused(on);
+              try {
+                savePreferences({ showTvWhenPaused: on });
+              } catch (err) {
+                log.warn(`Could not remember the paused Apple TV setting: ${err.message}`);
+              }
+            }
+          : undefined,
+        tvPaused: config.showTvWhenPaused,
         logFile,
       });
       tray.start();

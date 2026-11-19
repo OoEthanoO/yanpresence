@@ -130,6 +130,10 @@ export function buildActivity({ track, state, catalog, artworkUrl, config, start
  * opposite of the music layout and deliberate: "Watching Ted Lasso" means
  * something to a reader, "Watching Man City" does not.
  *
+ * Paused (shown by default; see showTvWhenPaused), the state line leads with
+ * it -- "Paused · S2E8 · Man City" -- and the progress bar goes, since Discord
+ * runs the bar off the clock and cannot hold it still.
+ *
  * There is no album art equivalent. Apple retired TV content from the iTunes
  * Search API (every `media=tvShow` query returns zero), Apple TV+ streams
  * carry no embedded artwork, and the Apple TV backend refuses requests without
@@ -145,13 +149,14 @@ export function buildWatchActivity({ item, state, artworkUrl, config, startedAt 
   const subtitle = item.isEpisode
     ? [code, item.name].filter(Boolean).join(' · ')
     : [item.year || null, item.director || null].filter(Boolean).join(' · ');
+  const line = subtitle || (item.isEpisode ? 'Episode' : 'Film');
 
   const activity = {
     type: ACTIVITY_WATCHING,
     name: config.tv?.activityName ?? 'Apple TV',
     status_display_type: STATUS_DISPLAY[config.statusDisplay] ?? STATUS_DISPLAY.details,
     details: clamp(heading, LIMITS.details),
-    state: clamp(subtitle || (item.isEpisode ? 'Episode' : 'Film'), LIMITS.state),
+    state: clamp(playing ? line : `Paused · ${line}`, LIMITS.state),
     assets: {},
     instance: false,
   };

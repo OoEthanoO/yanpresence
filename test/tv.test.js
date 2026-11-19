@@ -109,6 +109,69 @@ test('progress is withheld while paused', () => {
   assert.equal(a.timestamps, undefined);
 });
 
+test('a paused show or film says so first on the second line', () => {
+  const build = (item, state) =>
+    buildWatchActivity({ item, state, artworkUrl: null, config: CONFIG, startedAt: Date.now() });
+
+  assert.equal(build(EPISODE, 'paused').state, 'Paused · S2E8 · Man City');
+  assert.equal(build(EPISODE, 'paused').details, 'Ted Lasso', 'the status line is still the show');
+  assert.equal(build(FILM, 'paused').state, 'Paused · 2017 · Denis Villeneuve');
+  assert.equal(build({ ...FILM, year: 0, director: '' }, 'paused').state, 'Paused · Film');
+  assert.equal(build(EPISODE, 'playing').state, 'S2E8 · Man City', 'playing carries no label');
+});
+
+test('a paused show stays up by default, and its own switch takes it down', () => {
+  const app = new YanPresence({ ...CONFIG }, { dryRun: true });
+  app.tvCatalog = null; // no lookups: this is about what gets shown
+  const shown = [];
+  let hides = 0;
+  app.queue = (activity) => shown.push(activity);
+  app.scheduleHide = () => (hides += 1);
+
+  const item = { ...EPISODE, key: 'ted-lasso-2-8', position: 600 };
+  app.onTvSnapshot({ active: true, state: 'paused', item, receivedAt: Date.now() });
+  assert.equal(hides, 0);
+  assert.equal(shown.at(-1)?.state, 'Paused · S2E8 · Man City');
+  assert.equal(shown.at(-1)?.timestamps, undefined);
+
+  // Switched off mid-pause, the card comes down; back on, it returns.
+  app.setTvShowWhenPaused(false);
+  assert.equal(hides, 1);
+  const before = shown.length;
+  app.setTvShowWhenPaused(true);
+  assert.equal(shown.length, before + 1);
+  assert.equal(shown.at(-1).state, 'Paused · S2E8 · Man City');
+
+  // Resuming drops the label and brings the progress bar back.
+  app.onTvSnapshot({ active: true, state: 'playing', item, receivedAt: Date.now() });
+  assert.equal(shown.at(-1).state, 'S2E8 · Man City');
+  assert.ok(shown.at(-1).timestamps, 'progress while playing');
+
+  app.stop();
+});
+
+test("music's pause setting no longer decides for TV", () => {
+  const paused = (config) => {
+    const app = new YanPresence(config, { dryRun: true });
+    app.tvCatalog = null;
+    let hides = 0;
+    let shows = 0;
+    app.queue = () => (shows += 1);
+    app.scheduleHide = () => (hides += 1);
+    app.onTvSnapshot({
+      active: true,
+      state: 'paused',
+      item: { ...EPISODE, key: 'ted-lasso-2-8', position: 600 },
+      receivedAt: Date.now(),
+    });
+    app.stop();
+    return { hides, shows };
+  };
+
+  assert.deepEqual(paused({ ...CONFIG, showWhenPaused: false, showTvWhenPaused: true }), { hides: 0, shows: 1 });
+  assert.deepEqual(paused({ ...CONFIG, showWhenPaused: true, showTvWhenPaused: false }), { hides: 1, shows: 0 });
+});
+
 test('TV artwork is squared without cropping the frame', () => {
   // Apple's TV art is 16:9. A plain 1024x1024 request returns 1024x576, and
   // the crop codes that do fill a square (sr/cc/ve) eat the title treatment.

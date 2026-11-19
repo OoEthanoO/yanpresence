@@ -19,10 +19,10 @@
 //
 // Node talks to it over a socket on fd 3, named by YANPRESENCE_MENU_FD. The
 // lines sent from here are the ones the Windows tray prints -- "ready", "quit",
-// "artist-photo on" and "artist-photo off" -- so src/tray.js reads both alike.
-// The lines from Node are JSON, one object each:
+// "artist-photo on|off" and "tv-paused on|off" -- so src/tray.js reads both
+// alike. The lines from Node are JSON, one object each:
 //
-//   {"type":"hello","logFile":"...","artistPhoto":true}  once, at startup
+//   {"type":"hello","logFile":"...","artistPhoto":true,"tvPaused":true}  once, at startup
 //   {"type":"status","tooltip":"...","line":"..."}        what the card says
 //   {"type":"fatal","message":"...","logFile":"..."}      could not start
 //
@@ -284,10 +284,12 @@ final class MenuBar: NSObject, NSMenuDelegate {
   private let status = NSMenuItem(title: "Starting…", action: nil, keyEquivalent: "")
   private let permission = NSMenuItem(title: "", action: nil, keyEquivalent: "")
   private let artistPhoto = NSMenuItem(title: "Show Artist Photo", action: nil, keyEquivalent: "")
+  private let tvPaused = NSMenuItem(title: "Show Apple TV While Paused", action: nil, keyEquivalent: "")
   private let openAtLogin = NSMenuItem(title: "Open at Login", action: nil, keyEquivalent: "")
   private let openLog = NSMenuItem(title: "Open Log", action: nil, keyEquivalent: "")
 
   var onArtistPhoto: ((Bool) -> Void)?
+  var onTvPaused: ((Bool) -> Void)?
   private(set) var logFile: URL?
 
   override init() {
@@ -317,6 +319,10 @@ final class MenuBar: NSObject, NSMenuDelegate {
     // remembered choice are both its to read.
     artistPhoto.isHidden = true
     menu.addItem(artistPhoto)
+    tvPaused.target = self
+    tvPaused.action = #selector(toggleTvPaused)
+    tvPaused.isHidden = true
+    menu.addItem(tvPaused)
     openAtLogin.target = self
     openAtLogin.action = #selector(toggleOpenAtLogin)
     menu.addItem(openAtLogin)
@@ -337,16 +343,23 @@ final class MenuBar: NSObject, NSMenuDelegate {
     item.menu = menu
   }
 
-  func hello(logFile: String?, artistPhoto on: Bool?) {
+  func hello(logFile: String?, artistPhoto: Bool?, tvPaused: Bool?) {
     if let logFile, !logFile.isEmpty {
       self.logFile = URL(fileURLWithPath: logFile)
       openLog.isHidden = false
     }
+    MenuBar.show(self.artistPhoto, ticked: artistPhoto)
+    MenuBar.show(self.tvPaused, ticked: tvPaused)
+  }
+
+  /// A switch Node reported on, ticked where it stands; one it left out
+  /// (null) stays hidden.
+  private static func show(_ item: NSMenuItem, ticked on: Bool?) {
     if let on {
-      artistPhoto.state = on ? .on : .off
-      artistPhoto.isHidden = false
+      item.state = on ? .on : .off
+      item.isHidden = false
     } else {
-      artistPhoto.isHidden = true
+      item.isHidden = true
     }
   }
 
@@ -396,6 +409,12 @@ final class MenuBar: NSObject, NSMenuDelegate {
     // on the card and remembers it for next time.
     artistPhoto.state = artistPhoto.state == .on ? .off : .on
     onArtistPhoto?(artistPhoto.state == .on)
+  }
+
+  @objc private func toggleTvPaused() {
+    // As above: ticked here, applied and remembered by Node.
+    tvPaused.state = tvPaused.state == .on ? .off : .on
+    onTvPaused?(tvPaused.state == .on)
   }
 
   @objc private func toggleOpenAtLogin() {
@@ -568,6 +587,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       self.menuBar?.onArtistPhoto = { [weak self] on in
         self?.engine?.send(on ? "artist-photo on" : "artist-photo off")
       }
+      self.menuBar?.onTvPaused = { [weak self] on in
+        self?.engine?.send(on ? "tv-paused on" : "tv-paused off")
+      }
       self.startEngine()
       Installation.applyOpenAtLoginDefault()
     }
@@ -640,7 +662,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     switch message["type"] as? String {
     case "hello":
       saidHello = true
-      menuBar?.hello(logFile: message["logFile"] as? String, artistPhoto: message["artistPhoto"] as? Bool)
+      menuBar?.hello(
+        logFile: message["logFile"] as? String,
+        artistPhoto: message["artistPhoto"] as? Bool,
+        tvPaused: message["tvPaused"] as? Bool
+      )
       engine?.send("ready")
     case "status":
       menuBar?.setStatus(tooltip: message["tooltip"] as? String ?? "", line: message["line"] as? String ?? "")

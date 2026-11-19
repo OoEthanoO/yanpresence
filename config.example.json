@@ -211,7 +211,12 @@
   // ambiguous between tracks, and 1.5s for the web player, whose pause is not.
   "pauseClearDelayMs": null,
 
+  // Keep the music presence up while paused (off: a paused track disappears).
   "showWhenPaused": false,
+
+  // Keep a paused Apple TV show or film up, marked "Paused" with no progress
+  // bar. The menu bar icon (macOS) and the tray menu (Windows) switch this too.
+  "showTvWhenPaused": true,
 
   // The artist's photo, in the small circle on the corner of the album art.
   // On Windows the tray menu switches it too, and remembers the choice in

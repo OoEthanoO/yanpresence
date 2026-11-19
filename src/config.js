@@ -156,10 +156,19 @@ export const DEFAULTS = {
   // as a seek and re-send timestamps.
   seekToleranceSec: 2,
 
-  // Keep the presence up while playback is paused. Off by default: a paused
-  // track is not something you are listening to, and Discord's own Spotify
-  // integration drops the status on pause too.
+  // Keep the music presence up while playback is paused. Off by default: a
+  // paused track is not something you are listening to, and Discord's own
+  // Spotify integration drops the status on pause too. Apple TV has its own
+  // switch, below.
   showWhenPaused: false,
+
+  // Keep an Apple TV show or film on the card while it is paused, marked
+  // "Paused" and without the progress bar. On by default, unlike music: a
+  // paused episode is still what you are in the middle of watching, and it
+  // stays open in the player until you close it. The menu bar icon on macOS
+  // and the tray menu on Windows switch this, and remember the choice in
+  // preferences.json.
+  showTvWhenPaused: true,
 
   // Milliseconds playback must be non-playing -- paused, stopped or quit --
   // before the presence is cleared. Music.app blips `paused` between tracks,
@@ -487,7 +496,7 @@ export const PREFERENCES_FILE = path.join(SUPPORT_DIR, 'preferences.json');
 
 // What the file may hold, and as what. Anything else in it is ignored, so it
 // cannot quietly become a second config file.
-const PREFERENCE_TYPES = { artistPhoto: 'boolean' };
+const PREFERENCE_TYPES = { artistPhoto: 'boolean', showTvWhenPaused: 'boolean' };
 
 export function loadPreferences(file = PREFERENCES_FILE) {
   let raw;
@@ -579,6 +588,9 @@ export function validateConfig(config) {
   }
   if (typeof config.artistPhoto !== 'boolean') {
     problems.push(`artistPhoto must be true or false (got ${JSON.stringify(config.artistPhoto)})`);
+  }
+  if (typeof config.showTvWhenPaused !== 'boolean') {
+    problems.push(`showTvWhenPaused must be true or false (got ${JSON.stringify(config.showTvWhenPaused)})`);
   }
   if (!['shared', 's3', 'command', 'webhook'].includes(config.hosting.mode)) {
     problems.push(`hosting.mode must be "shared", "s3", "command" or "webhook" (got ${config.hosting.mode})`);

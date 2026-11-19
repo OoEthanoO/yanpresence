@@ -69,6 +69,11 @@ And expanded, when someone clicks into your profile:
 - **Nothing shown while paused.** Pause and the status disappears, the same way
   Discord's Spotify integration behaves. Set `showWhenPaused: true` to keep it
   up instead.
+- **Apple TV stays up while paused.** A paused show or film stays on the card
+  until you close it, with "Paused" leading the second line and no progress
+  bar. Untick **Show Apple TV While Paused** in the menu bar (macOS) or tray
+  menu (Windows), or set `showTvWhenPaused: false`, to have it disappear on
+  pause like music.
 - Survives Discord restarts, Music.app restarts, and sleep/wake.
 
 ## Install on Windows
@@ -671,7 +676,7 @@ macOS, `%LOCALAPPDATA%\yanpresence\cache` on Windows, and
 | `browser.mpris.enabled` | `true` | Read players off the session bus. Identifies Apple Music by itself in Firefox. |
 | `browser.mpris.players` | `{}` | Map an MPRIS bus name fragment to `music` / `tv` / `ignore`, for browsers that publish no page URL. |
 | `statusDisplay` | `"details"` | Which field lands on your status line: `details` (song), `state` (artist, Spotify's choice), `name`. |
-| `windows.tray` | `false` | Windows: show a notification-area icon with Quit and the artist photo switch. The Start menu shortcut passes `--tray` itself. See [Windows](#windows). The macOS app always has its menu bar icon. |
+| `windows.tray` | `false` | Windows: show a notification-area icon with Quit and the artist photo and paused Apple TV switches. The Start menu shortcut passes `--tray` itself. See [Windows](#windows). The macOS app always has its menu bar icon. |
 | `windows.appIds.music` | `"AppleInc.AppleMusicWin"` | Windows: AUMID prefix of the app whose media session is Apple Music. |
 | `windows.appIds.tv` | `"AppleInc.AppleTVWin"` | Windows: the same, for Apple TV — which has never answered, since that app publishes no session. Kept so a future version that does is noticed. |
 | `windows.tvUiAutomation` | `true` | Windows: read the Apple TV app through UI Automation, the only way it can be read. See [Apple TV on Windows](#apple-tv-on-windows). |
@@ -679,7 +684,8 @@ macOS, `%LOCALAPPDATA%\yanpresence\cache` on Windows, and
 | `artistPhoto` | `true` | The artist's photo in the small corner badge. No photo, no badge. The menu bar icon on macOS and the tray menu on Windows switch it, and remember the choice in `preferences.json` beside `config.json`, which wins over this value. The old `showSmallImage` and `smallImageKey` are ignored, except that `showSmallImage: false` still means no badge. |
 | `placeholderImageKey` | `"blank"` | Portal asset shown when there's no album art. Shared applications include it; upload `assets/blank.png` only for your own application. `null` leaves the slot empty. |
 | `linkButtons` | `false` | Also attach classic Rich Presence buttons — a fallback for older clients that don't render `details_url`/`state_url`/`large_url`. |
-| `showWhenPaused` | `false` | Keep the presence up while paused. Off by default — a paused track isn't something you're listening to. When on, the progress bar is dropped. |
+| `showWhenPaused` | `false` | Keep the music presence up while paused. Off by default — a paused track isn't something you're listening to. When on, the progress bar is dropped. Apple TV has its own switch, `showTvWhenPaused`. |
+| `showTvWhenPaused` | `true` | Keep a paused Apple TV show or film on the card, with "Paused" leading the second line and no progress bar. On by default — a paused episode is still what you're watching. The menu bar icon on macOS and the tray menu on Windows switch it, and remember the choice in `preferences.json`, which wins over this value. |
 | `pollIntervalMs` | `1000` | How often the source is sampled. |
 | `minUpdateIntervalMs` | `2500` | Floor between `SET_ACTIVITY` frames; Discord rate-limits these. |
 | `seekToleranceSec` | `2` | Drift before a seek is assumed and the timeline is rebased. |
@@ -857,6 +863,7 @@ why it could not start, if it could not.
   │ Allow Control of Music…       │  ← only after you refused the prompt
   │ ───────────────────────────── │
   │ ✓ Show Artist Photo           │  ← the badge on the cover's corner
+  │ ✓ Show Apple TV While Paused  │  ← a paused show stays, marked Paused
   │ ✓ Open at Login               │
   │ ───────────────────────────── │
   │ Open Log                      │
@@ -866,7 +873,8 @@ why it could not start, if it could not.
   └───────────────────────────────┘
 ```
 
-**Show Artist Photo** works as on Windows, remembering the choice in
+**Show Artist Photo** and **Show Apple TV While Paused** work as on Windows,
+remembering the choice in
 `~/Library/Application Support/yanpresence/preferences.json`. **Quit** — and
 logging out, or anything else that asks the app to quit — clears the presence
 with Discord before Node exits. A Node that has not exited 8 seconds later is
@@ -993,6 +1001,7 @@ launcher passes `--tray` and you get a notification-area icon:
   │ Listening to Be Her …   │  ← what the card currently says
   │ ─────────────────────── │
   │ ✓ Show artist photo     │  ← the badge on the cover's corner
+  │ ✓ Show Apple TV while … │  ← a paused show stays, marked Paused
   │ ─────────────────────── │
   │ Open log                │
   │ Quit yanpresence        │
@@ -1003,6 +1012,10 @@ launcher passes `--tray` and you get a notification-area icon:
 corner, or takes it off. The card changes straight away, and the choice is
 remembered in `%APPDATA%\yanpresence\preferences.json`, so it survives a
 restart and wins over `artistPhoto` in `config.json`.
+
+**Show Apple TV while paused** keeps a paused show or film on the card, marked
+"Paused", until you close it; untick it and a pause takes the card down, as it
+does for music. It is remembered the same way, over `showTvWhenPaused`.
 
 **Quit** shuts the app down properly — it clears the presence with Discord on
 the way out rather than leaving a stale "Listening to…" behind. Hovering shows

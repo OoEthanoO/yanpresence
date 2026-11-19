@@ -48,8 +48,9 @@ export function tellMenuBar(message, fd = menuBarChannel()) {
  * process a user cannot stop without Task Manager is not something to ship.
  * So this puts an icon in the tray whose menu has a Quit that shuts the app
  * down properly, clearing the presence with Discord on the way out. With no
- * window to hold settings, the menu also carries the one worth changing
- * without opening a config file: whether the card shows the artist's photo.
+ * window to hold settings, the menu also carries the two worth changing
+ * without opening a config file: whether the card shows the artist's photo,
+ * and whether a paused Apple TV show or film stays on it.
  *
  * On Windows the icon itself lives in a PowerShell child running a WinForms
  * message loop, because a message loop is not something Node can host. It
@@ -63,12 +64,24 @@ export function tellMenuBar(message, fd = menuBarChannel()) {
  * as JSON, rather than through a file.
  */
 export class Tray {
-  constructor({ onQuit, onArtistPhoto, artistPhoto = true, logFile = '', channel = null } = {}) {
+  constructor({
+    onQuit,
+    onArtistPhoto,
+    artistPhoto = true,
+    onTvPaused,
+    tvPaused = true,
+    logFile = '',
+    channel = null,
+  } = {}) {
     this.onQuit = onQuit;
     this.onArtistPhoto = onArtistPhoto;
+    // Left out of the menu when there is no handler, which is how the app
+    // says TV is not being watched at all.
+    this.onTvPaused = onTvPaused;
     // Kept current as the menu reports changes, so an icon started again
-    // shows the switch where the user last left it.
+    // shows the switches where the user last left them.
     this.artistPhoto = artistPhoto;
+    this.tvPaused = tvPaused;
     this.logFile = logFile;
     this.statusFile = path.join(os.tmpdir(), `yanpresence-tray-${process.pid}.txt`);
     // A descriptor, or an already-connected stream (which is how the tests
@@ -98,7 +111,8 @@ export class Tray {
       ['-STA', ...psArgs(TRAY_SCRIPT, '-ParentPid', String(process.pid), '-StatusFile', this.statusFile,
         ...(fs.existsSync(ICON) ? ['-IconFile', ICON] : []),
         ...(this.logFile ? ['-LogFile', this.logFile] : []),
-        ...(this.onArtistPhoto ? ['-ArtistPhoto', this.artistPhoto ? 'on' : 'off'] : []))],
+        ...(this.onArtistPhoto ? ['-ArtistPhoto', this.artistPhoto ? 'on' : 'off'] : []),
+        ...(this.onTvPaused ? ['-TvPaused', this.tvPaused ? 'on' : 'off'] : []))],
       { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }
     );
 
@@ -146,13 +160,14 @@ export class Tray {
       this.onQuit?.();
     });
 
-    // What the app cannot know without reading the config: whether the switch
-    // starts ticked, and where "Open Log" should point. Null leaves the switch
-    // out, as the Windows icon does when there is no handler for it.
+    // What the app cannot know without reading the config: whether each
+    // switch starts ticked, and where "Open Log" should point. Null leaves a
+    // switch out, as the Windows icon does when there is no handler for it.
     this.send({
       type: 'hello',
       logFile: this.logFile,
       artistPhoto: this.onArtistPhoto ? this.artistPhoto : null,
+      tvPaused: this.onTvPaused ? this.tvPaused : null,
     });
   }
 
@@ -175,6 +190,9 @@ export class Tray {
       } else if (line === 'artist-photo on' || line === 'artist-photo off') {
         this.artistPhoto = line === 'artist-photo on';
         this.onArtistPhoto?.(this.artistPhoto);
+      } else if (line === 'tv-paused on' || line === 'tv-paused off') {
+        this.tvPaused = line === 'tv-paused on';
+        this.onTvPaused?.(this.tvPaused);
       }
     }
   }
